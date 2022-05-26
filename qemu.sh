@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Sendin' Out a TEST O S
+qemu-system-x86_64 -drive format=raw,unit=0,file=test.img -bios bios64.bin -m 256M -display sdl -vga std -name TESTOS -machine q35 -net none
