@@ -27,3 +27,5 @@ NOTE: This assumes you already have a valid BOOTX64.EFI file in the current dire
 qemu.bat is included as an example, change the drive and bios names as needed, as well as any other parms.
 
 A valid OVMF file for qemu is also included as 'bios64.bin'.
+
+![Example screenshot](./example.png "Showing an example of running a generated image in qemu.")
