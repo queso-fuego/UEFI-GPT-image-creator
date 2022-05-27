@@ -28,4 +28,12 @@ qemu.bat is included as an example, change the drive and bios names as needed, a
 
 A valid OVMF file for qemu is also included as 'bios64.bin'.
 
+## ToDo
+- Make BOOTX64.EFI or other files optional. If found then this file would be added to the /EFI/BOOT/ directory, if not it would not be added and the FAT clusters would not be written.
+
+- Add commandline option to update a given BOOTX64.EFI or other file in the EFI system partition ("-u <file>"?). This would allow updating an EFI bootloader without needing to remake the whole 256MB image every time.
+
+- Add commandline option to add a file to the basic data partition ("-a <file>"?). This would allow adding something like an OS binary to the GPT image, which the .EFI bootloader file could run and launch.
+
+Example:
 ![Example screenshot](./example.png "Showing an example of running a generated image in qemu.")
