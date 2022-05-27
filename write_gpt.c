@@ -301,6 +301,8 @@ int main(int argc, char *argv[]) {
     const uint64_t first_part_LBA = 0x80;
     const gpt_guid_t efi_system_partition = {0xC12A7328, 0xF81F, 0x11D2, 0xBA, 0x4B, {0x00,0xA0,0xC9,0x3E,0xC9,0x3B}};
     const gpt_guid_t microsoft_basic_data_partition = {0xEBD0A0A2, 0xB9E5, 0x4433, 0x87, 0xC0, {0x68,0xB6,0xB7,0x26,0x99,0xC7}};
+    uint32_t bootloader_file_size;
+    int bootloader_file_size_sectors;
 
     FILE *output_file = NULL;
 
@@ -451,15 +453,14 @@ int main(int argc, char *argv[]) {
 
     // Get bootloader file size
     FILE *bootloader = fopen("BOOTX64.EFI", "rb");
-    if (!bootloader) {
-        fprintf(stderr, "Could not find or open 'BOOTX64.EFI'. Please add this file to the current directory.\n");
-        return EXIT_FAILURE;
-    }
+    bool add_bootloader = false;
 
-    fseek(bootloader, 0, SEEK_END);
-    const uint32_t bootloader_file_size = ftell(bootloader);
-    const int bootloader_file_size_sectors = bootloader_file_size / 512;
-    rewind(bootloader);
+    if (bootloader) {
+        add_bootloader = true;
+        puts("BOOTX64.EFI found. Adding to 'EFI/BOOT/' folder.");
+    } else {
+        puts("BOOTX64.EFI not found in current directory. ESP will have empty 'EFI/BOOT/' folder.");
+    }
 
     // Write FAT values/clusters
     // Top 4 bits of each cluster are reserved in FAT32
@@ -479,20 +480,28 @@ int main(int argc, char *argv[]) {
     fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 3 - EFI directory, end of cluster chain marker
     fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 4 - BOOT directory, end of cluster chain marker
 
-    // Clusters 5-size of BOOTX64.EFI in sectors - value of cluster = next cluster with file data
-    cluster = 0x00000006;
-    for (int i = 0; i < bootloader_file_size_sectors; i++) { 
+    if (add_bootloader) {
+        // Get file size
+        fseek(bootloader, 0, SEEK_END);
+        bootloader_file_size = ftell(bootloader);
+        bootloader_file_size_sectors = bootloader_file_size / 512;
+        rewind(bootloader);
+
+        // Clusters 5-size of BOOTX64.EFI in sectors - value of cluster = next cluster with file data
+        cluster = 0x00000006;
+        for (int i = 0; i < bootloader_file_size_sectors; i++) { 
+            fwrite(&cluster, sizeof cluster, 1, output_file);
+            cluster++;    
+        }
+
+        if ((bootloader_file_size % 512) > 0) 
+            fwrite(&cluster, sizeof cluster, 1, output_file);
+
+        // Overwrite last cluster with end of cluster chain
+        fseek(output_file, -4, SEEK_CUR);
+        cluster = 0x0FFFFFFF; 
         fwrite(&cluster, sizeof cluster, 1, output_file);
-        cluster++;    
     }
-
-    if ((bootloader_file_size % 512) > 0) 
-        fwrite(&cluster, sizeof cluster, 1, output_file);
-
-    // Overwrite last cluster with end of cluster chain
-    fseek(output_file, -4, SEEK_CUR);
-    cluster = 0x0FFFFFFF; 
-    fwrite(&cluster, sizeof cluster, 1, output_file);
 
     // Write 2nd FAT
     const uint64_t second_fat_sector = first_fat_sector + vbr.logical_sectors_per_FAT_EBPB;
@@ -510,20 +519,22 @@ int main(int argc, char *argv[]) {
     fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 3 - EFI directory, end of cluster chain marker
     fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 4 - BOOT directory, end of cluster chain marker
 
-    // Clusters 5-size of BOOTX64.EFI in sectors - value of cluster = next cluster with file data
-    cluster = 0x00000006;
-    for (int i = 0; i < bootloader_file_size_sectors; i++) { 
+    if (add_bootloader) {
+        // Clusters 5-size of BOOTX64.EFI in sectors - value of cluster = next cluster with file data
+        cluster = 0x00000006;
+        for (int i = 0; i < bootloader_file_size_sectors; i++) { 
+            fwrite(&cluster, sizeof cluster, 1, output_file);
+            cluster++;    
+        }
+
+        if ((bootloader_file_size % 512) > 0) 
+            fwrite(&cluster, sizeof cluster, 1, output_file);
+
+        // Overwrite last cluster with end of cluster chain
+        fseek(output_file, -4, SEEK_CUR);
+        cluster = 0x0FFFFFFF; 
         fwrite(&cluster, sizeof cluster, 1, output_file);
-        cluster++;    
     }
-
-    if ((bootloader_file_size % 512) > 0) 
-        fwrite(&cluster, sizeof cluster, 1, output_file);
-
-    // Overwrite last cluster with end of cluster chain
-    fseek(output_file, -4, SEEK_CUR);
-    cluster = 0x0FFFFFFF; 
-    fwrite(&cluster, sizeof cluster, 1, output_file);
 
     // Write FAT32 root dir entries --------------------------
     const uint64_t first_data_sector = second_fat_sector + vbr.logical_sectors_per_FAT_EBPB;
@@ -572,26 +583,31 @@ int main(int argc, char *argv[]) {
     dir_entry.first_cluster_low = 0x3;                      // EFI/ directory
     fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
 
-    memcpy(dir_entry.file_name, "BOOTX64 ", 8);  
-    memcpy(dir_entry.file_ext, "EFI", 3);
-    dir_entry.attributes = 0;
-    dir_entry.first_cluster_low = 0x5;
-    dir_entry.file_size_in_bytes = bootloader_file_size;
+    if (add_bootloader) {
+        memcpy(dir_entry.file_name, "BOOTX64 ", 8);  
+        memcpy(dir_entry.file_ext, "EFI", 3);
+        dir_entry.attributes = 0;
+        dir_entry.first_cluster_low = 0x5;
+        dir_entry.file_size_in_bytes = bootloader_file_size;
 
-    fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+        fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
 
-    // Write BOOTX64.EFI file data
-    fseek(output_file, (first_data_sector+3)*512, SEEK_SET);
+        // Write BOOTX64.EFI file data
+        fseek(output_file, (first_data_sector+3)*512, SEEK_SET);
 
-    uint8_t file_buf[512];
-    for (int i = 0; i < bootloader_file_size_sectors; i++) {
-        fread(file_buf, sizeof file_buf, 1, bootloader);
-        fwrite(file_buf, sizeof file_buf, 1, output_file);
-    }
+        uint8_t file_buf[512];
+        for (int i = 0; i < bootloader_file_size_sectors; i++) {
+            fread(file_buf, sizeof file_buf, 1, bootloader);
+            fwrite(file_buf, sizeof file_buf, 1, output_file);
+        }
 
-    if ((bootloader_file_size % 512) > 0) {     // Write rest of partial sector data
-        fread(file_buf, bootloader_file_size % 512, 1, bootloader);
-        fwrite(file_buf, bootloader_file_size % 512, 1, output_file);
+        if ((bootloader_file_size % 512) > 0) {     // Write rest of partial sector data
+            fread(file_buf, bootloader_file_size % 512, 1, bootloader);
+            fwrite(file_buf, bootloader_file_size % 512, 1, output_file);
+        }
+
+        // File cleanup
+        fclose(bootloader);
     }
 
     // Write secondary headers (LBA -2 to -33) & GPT (LBA -1) ---------------------------------------
@@ -604,7 +620,6 @@ int main(int argc, char *argv[]) {
     printf("Wrote %ld bytes successfully.\n", ftell(output_file));
     
     // Final Cleanup -------------------------------------
-    fclose(bootloader);
     fclose(output_file);
     
     // End program
