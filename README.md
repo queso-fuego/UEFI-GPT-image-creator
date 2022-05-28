@@ -20,19 +20,30 @@ A valid OVMF file for qemu is included as `bios64.bin`. Use it with qemu as `-bi
 `qemu.bat`/`qemu.sh` is included as an example, change the drive and bios names as needed, as well as any other parms.
 
 ## Build
-Windows: `build`
-Linux/BSD: `./build.sh`
+Windows: `build` \
+Linux/BSD: `./build.sh` \
 
 ## Usage
-Windows: `write_gpt [image_name]`
-Linux/BSD: `./write_gpt [image_name]`
+### Basic:
+Windows: `write_gpt [image_name]` \
+Linux/BSD: `./write_gpt [image_name]` \
 
-If no image name is provided, a default 'test.img' file is created.
+This will write a new image file with the default name 'test.img'.
 
-## ToDo
-- Add commandline option to update a given BOOTX64.EFI or other file in the EFI system partition ("-u file"?). This would allow updating an EFI bootloader without needing to remake the whole 256MB image every time.
+### Expanded:
+```console
+[-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]]
+-h --help: Print this message
+image_name: Name of output GPT disk image file
+-ue --update-efi: Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition
+-ud --update-data: Update/overwrite file_name in the basic data partition
+-ad --add-data: Add file_name to the basic data partition in a new image file
+```
 
-- Add commandline option to add a file to the basic data partition ("-a file"?). This would allow adding something like an OS binary to the GPT image, which the .EFI bootloader file could run and launch.
+Multi-dash options are aliases for the single dash options i.e. -ue is the same as --update-efi. \
+-ad or --add-data will only add `file_name` to a *new* image file. Existing files should use -ud or --update-data instead. \
+-ad can not be used with -ue/-ud. \
+If no image name is provided, a default 'test.img' file is created. 
 
 ## Example
 ![Example screenshot](./example.png "Showing an example of running a generated image in qemu.")
