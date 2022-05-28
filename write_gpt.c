@@ -168,6 +168,21 @@ typedef enum {
     ATTR_LONG_NAME = ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID,
 } fat32_dir_entry_file_attributes;
 
+// Command line arguments/options
+typedef struct {
+    bool error;
+    bool help;
+    bool update_efi;
+    bool update_data;
+    bool add_data;
+    FILE *image_file;
+    FILE *efi_file;
+    FILE *data_file;
+} options_t;
+
+const gpt_guid_t efi_system_partition = {0xC12A7328, 0xF81F, 0x11D2, 0xBA, 0x4B, {0x00,0xA0,0xC9,0x3E,0xC9,0x3B}};
+const gpt_guid_t microsoft_basic_data_partition = {0xEBD0A0A2, 0xB9E5, 0x4433, 0x87, 0xC0, {0x68,0xB6,0xB7,0x26,0x99,0xC7}};
+
 // Can also use premade table
 //uint32_t crc32_table[256] = {
 //    0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA, 0x076DC419, 0x706AF48F, 0xE963A535, 0x9E6495A3,
@@ -289,33 +304,334 @@ uint32_t get_volume_id(void) {
     return ((top_1 + top_2) << 16) | (bottom_1 + bottom_2);
 }
 
+// Get command line arguments/options
+void get_opts(int argc, char *argv[], options_t *opts) {
+    int image_argc = 0;
+
+    if (argc == 1) return;
+
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] != '-') {
+            if (opts->image_file != NULL) {
+                fprintf(stderr, "Only 1 image_name can be specified\n");
+                opts->error = true;
+                return;
+            }
+
+            opts->image_file = fopen(argv[i], "r+"); // Open file at beginning, for reading & writing, but DO NOT TRUNCATE!
+            image_argc = i; // Save argc value for later opts in case those opts work for new files
+
+            printf("Writing image '%s'\n", argv[i]);
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            opts->help = true;
+
+        } else if (!strcmp(argv[i], "-ue") || !strcmp(argv[i], "--update-efi")) {
+            // Update file in GPT image EFI system partition, /EFI/BOOT/ folder
+            i++;
+            if (!argv[i]) {
+                fprintf(stderr, "Must provide file_name to update in EFI system partition\n");
+                opts->error = true;
+                return;
+            } else {
+                opts->efi_file = fopen(argv[i], "rb");
+                if (!opts->efi_file) {
+                    fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
+                    opts->error = true;
+                    return;
+                }
+            }
+
+            if (!opts->image_file) {
+                fprintf(stderr, "Must provide image_name to update file_name in\n");
+                opts->error = true;
+                return;
+            }
+
+            opts->update_efi = true;
+            printf("Overwriting EFI/BOOT/ with file '%s'\n", argv[i]);
+
+        } else if (!strcmp(argv[i], "-ud") || !strcmp(argv[i], "--update-data")) {
+            // Update file in GPT image basic data partition
+            i++;
+            if (!argv[i]) {
+                fprintf(stderr, "Must provide file_name to update in basic data partition\n");
+                opts->error = true;
+                return;
+            } else {
+                opts->data_file = fopen(argv[i], "rb");
+                if (!opts->data_file) {
+                    fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
+                    opts->error = true;
+                    return;
+                }
+            }
+
+            if (!opts->image_file) {
+                fprintf(stderr, "Must provide image_name to update file_name in\n");
+                opts->error = true;
+                return;
+            }
+
+            opts->update_data = true;
+            printf("Overwriting data partition with file '%s'\n", argv[i]);
+
+        } else if (!strcmp(argv[i], "-ad") || !strcmp(argv[i], "--add-data")) {
+            // Add file to GPT image basic data partition at image creation
+            i++;
+            if (!argv[i]) {
+                fprintf(stderr, "Must provide file_name to add to basic data partition\n");
+                opts->error = true;
+                return;
+            } else {
+                opts->data_file = fopen(argv[i], "rb");
+                if (!opts->data_file) {
+                    fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
+                    opts->error = true;
+                    return;
+                }
+            }
+
+            if (!opts->image_file) {
+                // Assuming writing a new image
+                if (image_argc == 0) {
+                    // Did not provide name for image file yet
+                    fprintf(stderr, "Must provide image_name to add file_name to\n");
+                    opts->error = true;
+                    return;
+                }
+
+                opts->image_file = fopen(argv[image_argc], "wb");
+            }
+
+            if (opts->update_efi || opts->update_data) {
+                fprintf(stderr, "Cannot update an image and add to new image. Try only updating or adding.\n");
+                opts->error = true;
+                return;
+            }
+
+            opts->add_data = true;
+            printf("Adding file '%s' to basic data partition\n", argv[i]);
+        }
+    }
+}
+
+void update_efi_file(FILE *image_file, FILE *efi_file) {
+    /* 
+     * NOTE: Assuming sectors per cluster is 1 and bytes per sector is 512. 
+     * Change later to get these values as needed
+     */
+    partition_table_header_t gpt_header;
+    partition_entry_t part;
+    vbr_t vbr;
+    uint64_t file_size, file_size_sectors;
+    uint32_t cluster = 0;
+    uint8_t file_buf[512];
+
+    // Get LBA of EFI system partitition
+    fseek(image_file, sizeof(mbr_t), SEEK_SET);
+    fread(&gpt_header, sizeof gpt_header, 1, image_file);
+    fseek(image_file, gpt_header.partition_entries_start_LBA*512, SEEK_SET);
+
+    fread(&part, sizeof part, 1, image_file);
+    while (memcmp(&part.partition_type_GUID, &efi_system_partition, sizeof(gpt_guid_t)) != 0) 
+        fread(&part, sizeof part, 1, image_file);
+    
+    fseek(image_file, part.first_LBA*512, SEEK_SET);
+
+    // Go to FATs
+    fread(&vbr, sizeof vbr, 1, image_file);
+    const uint64_t FAT1_LBA = part.first_LBA + vbr.reserved_logical_sectors;
+    const uint64_t FAT2_LBA = FAT1_LBA + vbr.logical_sectors_per_FAT_EBPB;
+    fseek(image_file, FAT1_LBA*512, SEEK_SET);
+
+    // Write FAT32 clusters for efi_file data
+    fseek(image_file, (sizeof cluster)*5, SEEK_CUR);    // Location of cluster 5+, after /EFI/BOOT/ directories
+
+    fseek(efi_file, 0, SEEK_END);
+    file_size = ftell(efi_file);
+    file_size_sectors = file_size / 512;
+    rewind(efi_file);
+
+    // FAT1
+    cluster = 0x00000006;   // Starting cluster for efi_file, this is cluster 5, but it contains the next cluster of file data
+    for (uint32_t i = 0; i < file_size_sectors; i++, cluster++) 
+        fwrite(&cluster, sizeof cluster, 1, image_file); 
+
+    if (file_size % 512 > 0) // Partial sector data
+        fwrite(&cluster, sizeof cluster, 1, image_file); 
+
+    // Overwrite remaining clusters with 0s, in case this efi_file is smaller than previous one
+    fread(&cluster, sizeof cluster, 1, image_file);
+    while (cluster != 0) {
+        fseek(image_file, -(sizeof cluster), SEEK_CUR); // Move back
+        cluster = 0;
+        fwrite(&cluster, sizeof cluster, 1, image_file);   // Overwrite with 0s
+        fread(&cluster, sizeof cluster, 1, image_file);    // Move forward to next cluster
+    }
+
+    // FAT2
+    fseek(image_file, FAT2_LBA*512, SEEK_SET);
+    fseek(image_file, (sizeof cluster)*5, SEEK_CUR);    // Location of cluster 5+, after /EFI/BOOT/ directories
+
+    cluster = 0x00000006;   // Starting cluster for efi_file, this is cluster 5, but it contains the next cluster of file data
+    for (uint32_t i = 0; i < file_size_sectors; i++, cluster++) 
+        fwrite(&cluster, sizeof cluster, 1, image_file); 
+
+    if (file_size % 512 > 0) // Partial sector data
+        fwrite(&cluster, sizeof cluster, 1, image_file); 
+
+    // Overwrite remaining clusters with 0s, in case this efi_file is smaller than previous one
+    fread(&cluster, sizeof cluster, 1, image_file);
+    while (cluster != 0) {
+        fseek(image_file, -(sizeof cluster), SEEK_CUR); // Move back
+        cluster = 0;
+        fwrite(&cluster, sizeof cluster, 1, image_file);   // Overwrite with 0s
+        fread(&cluster, sizeof cluster, 1, image_file);    // Move forward to next cluster
+    }
+
+    // Go to /EFI/BOOT/ directory in image_file
+    const uint64_t root_dir_LBA = FAT2_LBA + vbr.logical_sectors_per_FAT_EBPB;
+    fseek(image_file, root_dir_LBA*512, SEEK_SET);
+    fseek(image_file, 512, SEEK_CUR);   // EFI/
+    fseek(image_file, 512, SEEK_CUR);   // BOOT/
+    fseek(image_file, 512, SEEK_CUR);   // efi_file location
+
+    // Write efi_file data
+    for (uint32_t i = 0; i < file_size_sectors; i++) {
+        fread(&file_buf, sizeof file_buf, 1, efi_file);
+        fwrite(&file_buf, sizeof file_buf, 1, image_file);
+    }
+
+    if (file_size % 512 > 0) { // Partial sector data
+        fread(&file_buf, (file_size % 512), 1, efi_file);
+        fwrite(&file_buf, (file_size % 512), 1, image_file);
+    }
+
+    // NOTE: Check if following sectors are non-0 and overwrite with 0s, or not needed?
+}
+
+void update_data_file(FILE *image_file, FILE *data_file) {
+    partition_table_header_t gpt_header;
+    partition_entry_t part;
+    uint64_t file_size, file_size_sectors;
+    uint8_t file_buf[512] = {0};
+    gpt_guid_t tmp_guid = microsoft_basic_data_partition;
+
+    // Get LBA of basic data partitition
+    fseek(image_file, sizeof(mbr_t), SEEK_SET);
+    fread(&gpt_header, sizeof gpt_header, 1, image_file);
+    fseek(image_file, gpt_header.partition_entries_start_LBA*512, SEEK_SET);
+
+    fread(&part, sizeof part, 1, image_file);
+    while (memcmp(&part.partition_type_GUID, &tmp_guid, sizeof(gpt_guid_t)) != 0) 
+        fread(&part, sizeof part, 1, image_file);
+    
+    fseek(image_file, part.first_LBA*512, SEEK_SET);
+
+    // Overwrite data partition with 0s
+    uint64_t data_size = part.last_LBA - part.first_LBA + 1;
+    uint64_t data_size_sectors = data_size / 512;
+    if (data_size % 512 > 0) data_size_sectors++;
+
+    for (uint64_t i = 0; i < data_size_sectors; i++)
+        fwrite(&file_buf, sizeof file_buf, 1, image_file);
+
+    // Write data_file to data partition
+    fseek(data_file, 0, SEEK_END);
+    file_size = ftell(data_file);
+    file_size_sectors = file_size / 512;
+    rewind(data_file);
+
+    fseek(image_file, part.first_LBA*512, SEEK_SET);
+
+    for (uint64_t i = 0; i < file_size_sectors; i++) {
+        fread(&file_buf, sizeof file_buf, 1, data_file);
+        fwrite(&file_buf, sizeof file_buf, 1, image_file);
+    }
+
+    if (file_size % 512 > 0) { // Partial sector data
+        fread(&file_buf, (file_size % 512), 1, data_file);
+        fwrite(&file_buf, (file_size % 512), 1, image_file);
+    }
+}
+
 int main(int argc, char *argv[]) {
     /* NOTE: fopen uses "rb" & "wb" to read/write binary, which fixes some odd issues on byte conversions and file seeking here and there */
     const size_t sector_size = 512;
-    const uint32_t image_sectors = 0x80000; // 0x80000*512 = 256MB
+    const uint32_t image_sectors = 0x80000;     // 0x80000*512 = 256MB
     const int first_usable_sector = 0x22;
     const int header_sectors = 16384/sector_size;
     const int secondary_headers_sector = image_sectors - 1 - header_sectors;
     const int secondary_gpt_sector = image_sectors-1;
-    const int part_count = 128;         // Number of partition entries
+    const int part_count = 128;                 // Number of partition entries
     const uint64_t first_part_LBA = 0x80;
-    const gpt_guid_t efi_system_partition = {0xC12A7328, 0xF81F, 0x11D2, 0xBA, 0x4B, {0x00,0xA0,0xC9,0x3E,0xC9,0x3B}};
-    const gpt_guid_t microsoft_basic_data_partition = {0xEBD0A0A2, 0xB9E5, 0x4433, 0x87, 0xC0, {0x68,0xB6,0xB7,0x26,0x99,0xC7}};
+    const uint64_t efi_size_sectors = 0x14000;  // 0x14000*512 = 40MB
+    const uint64_t data_size_sectors = 0x6B800; // 0x6B800*512 = 215MB
+    const int max_opts = 6;
+
     uint32_t bootloader_file_size;
     int bootloader_file_size_sectors;
+    options_t opts = {
+        .error = false,
+        .help = false,
+        .update_efi = false,
+        .update_data = false,
+        .add_data = false,
+        .image_file = NULL,
+        .efi_file = NULL,
+        .data_file = NULL,
+    };
 
-    FILE *output_file = NULL;
-
-    // Set output image file name
-    if (argc == 2) {
-        output_file = fopen(argv[1], "wb"); 
-        printf("Writing image '%s'\n", argv[1]);
-    } else if (argc == 1) {
-        output_file = fopen("test.img", "wb");
-        puts("Writing default image 'test.img'");
-    } else {
-        fprintf(stderr, "Usage: write_gpt [image_name]\n");
+    if (argc > max_opts) {
+        fprintf(stderr, "Usage: %s [-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]]\n"
+                        "-h --help: Print this message\n"
+                        "image_name: Name of output GPT disk image file\n"
+                        "-ue --update-efi: Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition\n"
+                        "-ud --update-data: Update/overwrite file_name in the basic data partition\n"
+                        "-ad --add-data: Add file_name to the basic data partition in a new image file\n"
+                        , argv[0]);
         return EXIT_FAILURE;
+    }
+
+    // Grab command line args
+    get_opts(argc, argv, &opts);
+
+    if (opts.help) {
+        fprintf(stderr, "Usage: %s [-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]]\n"
+                        "-h --help: Print this message\n"
+                        "image_name: Name of output GPT disk image file\n"
+                        "-ue --update-efi: Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition\n"
+                        "-ud --update-data: Update/overwrite file_name in the basic data partition\n"
+                        "-ad --add-data: Add file_name to the basic data partition in the created image file\n"
+                        , argv[0]);
+        return EXIT_SUCCESS;
+    }
+
+    if (opts.error) return EXIT_FAILURE;
+
+    if (!opts.image_file) {
+        // Set default output image file name
+        opts.image_file = fopen("test.img", "wb");
+        puts("Writing default image 'test.img'");
+    }
+
+    if (opts.update_efi) {
+        update_efi_file(opts.image_file, opts.efi_file);
+
+        fclose(opts.efi_file);
+        fclose(opts.image_file);
+        return EXIT_SUCCESS;
+    }
+
+    if (opts.update_data) {
+        update_data_file(opts.image_file, opts.data_file);
+
+        fclose(opts.data_file);
+        fclose(opts.image_file);
+        return EXIT_SUCCESS;
     }
 
     // Seed rng for GUID values later
@@ -330,12 +646,12 @@ int main(int argc, char *argv[]) {
             .partition_type = 0xEE,                     // GPT Protective MBR 
             .last_abs_sector_CHS = {0xFF, 0xFF, 0xFF},  // As large as can go to cover whole disk
             .first_abs_sector_LBA = 1,                  // LBA of GPT partition table header
-            .num_sectors = (1024*1024*256 / 512) - 1,   // Size of disk in sectors - 1
+            .num_sectors = image_sectors - 1,           // Size of disk in sectors - 1
         },
         .boot_signature = 0xAA55,
     };
 
-    assert(fwrite(&mbr, 1, sizeof mbr, output_file) == sector_size);
+    assert(fwrite(&mbr, 1, sizeof mbr, opts.image_file) == sector_size);
 
     // Define GPT headers ----------------------------------------
     partition_table_header_t partition_table_header = {
@@ -361,16 +677,16 @@ int main(int argc, char *argv[]) {
         {
             .partition_type_GUID = efi_system_partition,
             .partition_GUID = get_guid(),
-            .first_LBA = 0x80,
-            .last_LBA = 0x1407F,
+            .first_LBA = first_part_LBA,
+            .last_LBA = first_part_LBA + efi_size_sectors - 1,
             .attribute_flags = 0,
             .partition_name = u"EFI System Partition",
         },
         {
             .partition_type_GUID = microsoft_basic_data_partition,
             .partition_GUID = get_guid(),
-            .first_LBA = 0x14080,
-            .last_LBA = 0x7F87F,
+            .first_LBA = first_part_LBA + efi_size_sectors,
+            .last_LBA = first_part_LBA + efi_size_sectors + data_size_sectors - 1, 
             .attribute_flags = 0,
             .partition_name = u"Empty Space",
         },
@@ -389,8 +705,8 @@ int main(int argc, char *argv[]) {
     backup_header.header_crc32 = crc32(&backup_header, 92); // Only run CRC for 92 byte header
 
     // Write primary GPT (LBA 1) and headers (LBA 2-33) --------------------------------
-    assert(fwrite(&partition_table_header, 1, sizeof partition_table_header, output_file) == sector_size);                                     
-    assert(fwrite(partition_entries, 1, sizeof partition_entries, output_file) == header_sectors * sector_size);
+    assert(fwrite(&partition_table_header, 1, sizeof partition_table_header, opts.image_file) == sector_size);                                     
+    assert(fwrite(partition_entries, 1, sizeof partition_entries, opts.image_file) == header_sectors * sector_size);
 
     // Write partitions ----------------------------------------
     // EFI system partition: FAT32 VBR
@@ -433,8 +749,8 @@ int main(int argc, char *argv[]) {
     vbr.logical_sectors_per_FAT_EBPB = (tmp_1 + (tmp_2 - 1)) / tmp_2;   // Sectors per FAT
 
     // Write FAT32 VBR
-    fseek(output_file, first_part_LBA*512, SEEK_SET);   // Partition 0 First LBA
-    assert(fwrite(&vbr, 1, sizeof(vbr_t), output_file) == sector_size);
+    fseek(opts.image_file, first_part_LBA*512, SEEK_SET);   // Partition 0 First LBA
+    assert(fwrite(&vbr, 1, sizeof(vbr_t), opts.image_file) == sector_size);
 
     // Write FAT32 FS Info sector
     fs_info_t fs_info = {
@@ -445,11 +761,11 @@ int main(int argc, char *argv[]) {
         .most_recent_known_allocated_data_cluster = 17,  // Next free sector is 2 + root dir + EFI/ + EFI/BOOT/ + EFI/BOOT/BOOTX64.EFI size in sectors/clusters
         .signature_3 = {0x00, 0x00, 0x55, 0xAA},
     };
-    assert(fwrite(&fs_info, 1, sizeof(fs_info_t), output_file) == sector_size);
+    assert(fwrite(&fs_info, 1, sizeof(fs_info_t), opts.image_file) == sector_size);
 
     // Write Backup VBR, will skip over reserved sectors in between (they will be 0s)
-    fseek(output_file, (first_part_LBA + vbr.first_logical_sector_of_FAT32_boot_sector_copies)*512, SEEK_SET);
-    assert(fwrite(&vbr, 1, sizeof vbr, output_file) == sector_size);
+    fseek(opts.image_file, (first_part_LBA + vbr.first_logical_sector_of_FAT32_boot_sector_copies)*512, SEEK_SET);
+    assert(fwrite(&vbr, 1, sizeof vbr, opts.image_file) == sector_size);
 
     // Get bootloader file size
     FILE *bootloader = fopen("BOOTX64.EFI", "rb");
@@ -465,20 +781,20 @@ int main(int argc, char *argv[]) {
     // Write FAT values/clusters
     // Top 4 bits of each cluster are reserved in FAT32
     const uint64_t first_fat_sector = first_part_LBA + vbr.reserved_logical_sectors;
-    fseek(output_file, first_fat_sector*512, SEEK_SET);
+    fseek(opts.image_file, first_fat_sector*512, SEEK_SET);
 
     uint32_t cluster = 0;
     cluster = 0x0FFFFF00 | vbr.media_descriptor;        // Cluster 0 - bits 7-0 = fat ID
-    fwrite(&cluster, sizeof cluster, 1, output_file);
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);
     cluster = 0x0FFFFFFF;                               // Cluster 1 - end of cluster chain marker, or typically all bits set
-    fwrite(&cluster, sizeof cluster, 1, output_file);
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);
 
     cluster = 0x0FFFFFF8;
-    fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 2 - first available data cluster, root directory, end of cluster chain marker
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);   // Cluster 2 - first available data cluster, root directory, end of cluster chain marker
 
     cluster = 0x0FFFFFFF;
-    fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 3 - EFI directory, end of cluster chain marker
-    fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 4 - BOOT directory, end of cluster chain marker
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);   // Cluster 3 - EFI directory, end of cluster chain marker
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);   // Cluster 4 - BOOT directory, end of cluster chain marker
 
     if (add_bootloader) {
         // Get file size
@@ -490,57 +806,57 @@ int main(int argc, char *argv[]) {
         // Clusters 5-size of BOOTX64.EFI in sectors - value of cluster = next cluster with file data
         cluster = 0x00000006;
         for (int i = 0; i < bootloader_file_size_sectors; i++) { 
-            fwrite(&cluster, sizeof cluster, 1, output_file);
+            fwrite(&cluster, sizeof cluster, 1, opts.image_file);
             cluster++;    
         }
 
         if ((bootloader_file_size % 512) > 0) 
-            fwrite(&cluster, sizeof cluster, 1, output_file);
+            fwrite(&cluster, sizeof cluster, 1, opts.image_file);
 
         // Overwrite last cluster with end of cluster chain
-        fseek(output_file, -4, SEEK_CUR);
+        fseek(opts.image_file, -4, SEEK_CUR);
         cluster = 0x0FFFFFFF; 
-        fwrite(&cluster, sizeof cluster, 1, output_file);
+        fwrite(&cluster, sizeof cluster, 1, opts.image_file);
     }
 
     // Write 2nd FAT
     const uint64_t second_fat_sector = first_fat_sector + vbr.logical_sectors_per_FAT_EBPB;
-    fseek(output_file, second_fat_sector*512, SEEK_SET);
+    fseek(opts.image_file, second_fat_sector*512, SEEK_SET);
 
     cluster = 0x0FFFFF00 | vbr.media_descriptor;        // Cluster 0 - bits 7-0 = fat ID
-    fwrite(&cluster, sizeof cluster, 1, output_file);
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);
     cluster = 0x0FFFFFFF;                               // Cluster 1 - end of cluster chain marker, or typically all bits set
-    fwrite(&cluster, sizeof cluster, 1, output_file);
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);
 
     cluster = 0x0FFFFFF8;
-    fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 2 - first available data cluster, root directory, end of cluster chain marker
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);   // Cluster 2 - first available data cluster, root directory, end of cluster chain marker
 
     cluster = 0x0FFFFFFF;
-    fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 3 - EFI directory, end of cluster chain marker
-    fwrite(&cluster, sizeof cluster, 1, output_file);   // Cluster 4 - BOOT directory, end of cluster chain marker
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);   // Cluster 3 - EFI directory, end of cluster chain marker
+    fwrite(&cluster, sizeof cluster, 1, opts.image_file);   // Cluster 4 - BOOT directory, end of cluster chain marker
 
     if (add_bootloader) {
         // Clusters 5-size of BOOTX64.EFI in sectors - value of cluster = next cluster with file data
         cluster = 0x00000006;
         for (int i = 0; i < bootloader_file_size_sectors; i++) { 
-            fwrite(&cluster, sizeof cluster, 1, output_file);
+            fwrite(&cluster, sizeof cluster, 1, opts.image_file);
             cluster++;    
         }
 
         if ((bootloader_file_size % 512) > 0) 
-            fwrite(&cluster, sizeof cluster, 1, output_file);
+            fwrite(&cluster, sizeof cluster, 1, opts.image_file);
 
         // Overwrite last cluster with end of cluster chain
-        fseek(output_file, -4, SEEK_CUR);
+        fseek(opts.image_file, -4, SEEK_CUR);
         cluster = 0x0FFFFFFF; 
-        fwrite(&cluster, sizeof cluster, 1, output_file);
+        fwrite(&cluster, sizeof cluster, 1, opts.image_file);
     }
 
     // Write FAT32 root dir entries --------------------------
     const uint64_t first_data_sector = second_fat_sector + vbr.logical_sectors_per_FAT_EBPB;
 
     // EFI subdirectory - cluster 3
-    fseek(output_file, first_data_sector*512, SEEK_SET);
+    fseek(opts.image_file, first_data_sector*512, SEEK_SET);
     time_t timestamp = time(NULL);
     struct tm *now = localtime(&timestamp);
     fat32_dir_entry_short_name_t dir_entry = {
@@ -554,34 +870,33 @@ int main(int argc, char *argv[]) {
         .file_size_in_bytes = 0,
     };
 
-    fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+    fwrite(&dir_entry, sizeof dir_entry, 1, opts.image_file);
 
     // EFI subdirectory entries --------------------------
     // EFI/BOOT/ subdirectory - cluster 4
-    fseek(output_file, (first_data_sector+1)*512, SEEK_SET);
+    fseek(opts.image_file, (first_data_sector+1)*512, SEEK_SET);
     memcpy(dir_entry.file_name, ".       ", 8);             // Current directory
     dir_entry.first_cluster_low = 0x3;                      // This cluster
-    fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+    fwrite(&dir_entry, sizeof dir_entry, 1, opts.image_file);
 
     memcpy(dir_entry.file_name, "..      ", 8);             // Parent directory
     dir_entry.first_cluster_low = 0x2;                      // Root directory
-    fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+    fwrite(&dir_entry, sizeof dir_entry, 1, opts.image_file);
 
     memcpy(dir_entry.file_name, "BOOT    ", 8);  
     dir_entry.first_cluster_low = 0x4;
-
-    fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+    fwrite(&dir_entry, sizeof dir_entry, 1, opts.image_file);
 
     // EFI/BOOT/ subdirectory entries -----------------------
     // BOOTX64.EFI file clusters 5+
-    fseek(output_file, (first_data_sector+2)*512, SEEK_SET);
+    fseek(opts.image_file, (first_data_sector+2)*512, SEEK_SET);
     memcpy(dir_entry.file_name, ".       ", 8);             // Current directory
     dir_entry.first_cluster_low = 0x4;                      // This cluster
-    fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+    fwrite(&dir_entry, sizeof dir_entry, 1, opts.image_file);
 
     memcpy(dir_entry.file_name, "..      ", 8);             // Parent directory
     dir_entry.first_cluster_low = 0x3;                      // EFI/ directory
-    fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+    fwrite(&dir_entry, sizeof dir_entry, 1, opts.image_file);
 
     if (add_bootloader) {
         memcpy(dir_entry.file_name, "BOOTX64 ", 8);  
@@ -590,37 +905,64 @@ int main(int argc, char *argv[]) {
         dir_entry.first_cluster_low = 0x5;
         dir_entry.file_size_in_bytes = bootloader_file_size;
 
-        fwrite(&dir_entry, sizeof dir_entry, 1, output_file);
+        fwrite(&dir_entry, sizeof dir_entry, 1, opts.image_file);
 
         // Write BOOTX64.EFI file data
-        fseek(output_file, (first_data_sector+3)*512, SEEK_SET);
+        fseek(opts.image_file, (first_data_sector+3)*512, SEEK_SET);
 
         uint8_t file_buf[512];
         for (int i = 0; i < bootloader_file_size_sectors; i++) {
             fread(file_buf, sizeof file_buf, 1, bootloader);
-            fwrite(file_buf, sizeof file_buf, 1, output_file);
+            fwrite(file_buf, sizeof file_buf, 1, opts.image_file);
         }
 
         if ((bootloader_file_size % 512) > 0) {     // Write rest of partial sector data
             fread(file_buf, bootloader_file_size % 512, 1, bootloader);
-            fwrite(file_buf, bootloader_file_size % 512, 1, output_file);
+            fwrite(file_buf, bootloader_file_size % 512, 1, opts.image_file);
         }
 
         // File cleanup
         fclose(bootloader);
     }
 
+    // Write optional file to basic data partition
+    if (opts.add_data) {
+        uint8_t file_buf[512];
+        uint64_t file_size, file_size_sectors;
+
+        // Go to Data partition start
+        fseek(opts.image_file, partition_entries[1].first_LBA*512, SEEK_SET); 
+
+        // Get size of data file
+        fseek(opts.data_file, 0, SEEK_END);
+        file_size = ftell(opts.data_file);
+        file_size_sectors = file_size / 512;
+        rewind(opts.data_file);
+
+        for (uint64_t i = 0; i < file_size_sectors; i++) {
+            fread(&file_buf, sizeof file_buf, 1, opts.data_file);
+            fwrite(&file_buf, sizeof file_buf, 1, opts.image_file);
+        }
+
+        if (file_size % 512 > 0) { // Partial sector data
+            fread(&file_buf, (file_size % 512), 1, opts.data_file);
+            fwrite(&file_buf, (file_size % 512), 1, opts.image_file);
+        }
+
+        fclose(opts.data_file);
+    }
+
     // Write secondary headers (LBA -2 to -33) & GPT (LBA -1) ---------------------------------------
-    fseek(output_file, secondary_headers_sector * sector_size, SEEK_SET);
-    assert(fwrite(partition_entries, 1, sizeof partition_entries, output_file) == header_sectors * sector_size);
+    fseek(opts.image_file, secondary_headers_sector * sector_size, SEEK_SET);
+    assert(fwrite(partition_entries, 1, sizeof partition_entries, opts.image_file) == header_sectors * sector_size);
 
-    fseek(output_file, secondary_gpt_sector * sector_size, SEEK_SET);
-    assert(fwrite(&backup_header, 1, sizeof backup_header, output_file) == sector_size);
+    fseek(opts.image_file, secondary_gpt_sector * sector_size, SEEK_SET);
+    assert(fwrite(&backup_header, 1, sizeof backup_header, opts.image_file) == sector_size);
 
-    printf("Wrote %ld bytes successfully.\n", ftell(output_file));
+    printf("Wrote %ld bytes successfully.\n", ftell(opts.image_file));
     
     // Final Cleanup -------------------------------------
-    fclose(output_file);
+    fclose(opts.image_file);
     
     // End program
     return EXIT_SUCCESS;
