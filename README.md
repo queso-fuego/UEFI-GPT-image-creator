@@ -21,12 +21,12 @@ A valid OVMF file for qemu is included as `bios64.bin`. Use it with qemu as `-bi
 
 ## Build
 Windows: `build` \
-Linux/BSD: `./build.sh` \
+Linux/BSD: `./build.sh` 
 
 ## Usage
 ### Basic:
 Windows: `write_gpt [image_name]` \
-Linux/BSD: `./write_gpt [image_name]` \
+Linux/BSD: `./write_gpt [image_name]` 
 
 This will write a new image file with the default name 'test.img'.
 

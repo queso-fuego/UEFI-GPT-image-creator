@@ -175,6 +175,7 @@ typedef struct {
     bool update_efi;
     bool update_data;
     bool add_data;
+    char efi_file_name[8]; // FAT32 8.3 short file name
     FILE *image_file;
     FILE *efi_file;
     FILE *data_file;
@@ -351,6 +352,14 @@ void get_opts(int argc, char *argv[], options_t *opts) {
             }
 
             opts->update_efi = true;
+
+            // Save file name for update_efi_file()
+            char *dot = strchr(argv[i], '.');
+            if (dot && (dot - argv[i] <= 8))
+                strncpy(opts->efi_file_name, argv[i], dot - argv[i]); 
+            else
+                strncpy(opts->efi_file_name, argv[i], 8); // Save file name for update_efi_file()
+
             printf("Overwriting EFI/BOOT/ with file '%s'\n", argv[i]);
 
         } else if (!strcmp(argv[i], "-ud") || !strcmp(argv[i], "--update-data")) {
@@ -418,7 +427,7 @@ void get_opts(int argc, char *argv[], options_t *opts) {
     }
 }
 
-void update_efi_file(FILE *image_file, FILE *efi_file) {
+void update_efi_file(FILE *image_file, FILE *efi_file, char *file_name) {
     /* 
      * NOTE: Assuming sectors per cluster is 1 and bytes per sector is 512. 
      * Change later to get these values as needed
@@ -429,6 +438,7 @@ void update_efi_file(FILE *image_file, FILE *efi_file) {
     uint64_t file_size, file_size_sectors;
     uint32_t cluster = 0;
     uint8_t file_buf[512];
+    fat32_dir_entry_short_name_t dir_entry;
 
     // Get LBA of EFI system partitition
     fseek(image_file, sizeof(mbr_t), SEEK_SET);
@@ -494,10 +504,25 @@ void update_efi_file(FILE *image_file, FILE *efi_file) {
 
     // Go to /EFI/BOOT/ directory in image_file
     const uint64_t root_dir_LBA = FAT2_LBA + vbr.logical_sectors_per_FAT_EBPB;
-    fseek(image_file, root_dir_LBA*512, SEEK_SET);
-    fseek(image_file, 512, SEEK_CUR);   // EFI/
-    fseek(image_file, 512, SEEK_CUR);   // BOOT/
-    fseek(image_file, 512, SEEK_CUR);   // efi_file location
+    fseek(image_file, (root_dir_LBA+2)*512, SEEK_SET);
+
+    // Write directory entry for efi_file so it shows in UEFI shell and/or auto boots on startup
+    time_t timestamp = time(NULL);
+    struct tm *now = localtime(&timestamp);
+
+    memcpy(dir_entry.file_name, file_name, 8);
+    memcpy(dir_entry.file_ext, "EFI", 3);
+    dir_entry.attributes = 0;
+    dir_entry.create_time = (now->tm_hour << 11) | (now->tm_min << 6) | (now->tm_sec/2);
+    dir_entry.create_date = (((now->tm_year + 1900)-1980) << 9) | ((now->tm_mon + 1) << 5) | now->tm_mday;
+    dir_entry.first_cluster_hi  = 0;
+    dir_entry.first_cluster_low = 0x5;
+    dir_entry.file_size_in_bytes = file_size;
+
+    fwrite(&dir_entry, sizeof dir_entry, 1, image_file);
+
+    // Go to /EFI/BOOT/<efi_file> location in image_file
+    fseek(image_file, (root_dir_LBA+3)*512, SEEK_SET); 
 
     // Write efi_file data
     for (uint32_t i = 0; i < file_size_sectors; i++) {
@@ -619,7 +644,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (opts.update_efi) {
-        update_efi_file(opts.image_file, opts.efi_file);
+        update_efi_file(opts.image_file, opts.efi_file, opts.efi_file_name);
 
         fclose(opts.efi_file);
         fclose(opts.image_file);
