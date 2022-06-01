@@ -673,8 +673,6 @@ int main(int argc, char *argv[]) {
         puts("Writing default image 'test.img'");
     }
 
-    printf("EFI System Partition size: %luMB, Basic Data Partition size: %luMB\n", (efi_size_sectors*512)/1048576, (data_size_sectors*512)/1048576);
-
     if (opts.update_efi) {
         update_efi_file(opts.image_file, opts.efi_file, opts.efi_file_name);
 
@@ -690,6 +688,9 @@ int main(int argc, char *argv[]) {
         fclose(opts.image_file);
         return EXIT_SUCCESS;
     }
+
+    // Writing new file from this point on, show size of partitions to user
+    printf("EFI System Partition size: %luMB, Basic Data Partition size: %luMB\n", (efi_size_sectors*512)/1048576, (data_size_sectors*512)/1048576);
 
     // Seed rng for GUID values later
     time_t t;
