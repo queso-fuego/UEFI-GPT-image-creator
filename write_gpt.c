@@ -183,6 +183,7 @@ typedef struct {
 
 const gpt_guid_t efi_system_partition = {0xC12A7328, 0xF81F, 0x11D2, 0xBA, 0x4B, {0x00,0xA0,0xC9,0x3E,0xC9,0x3B}};
 const gpt_guid_t microsoft_basic_data_partition = {0xEBD0A0A2, 0xB9E5, 0x4433, 0x87, 0xC0, {0x68,0xB6,0xB7,0x26,0x99,0xC7}};
+const size_t sector_size = 512;
 
 // Can also use premade table
 //uint32_t crc32_table[256] = {
@@ -358,7 +359,7 @@ void get_opts(int argc, char *argv[], options_t *opts) {
             if (dot && (dot - argv[i] <= 8))
                 strncpy(opts->efi_file_name, argv[i], dot - argv[i]); 
             else
-                strncpy(opts->efi_file_name, argv[i], 8); // Save file name for update_efi_file()
+                memcpy(opts->efi_file_name, argv[i], 8); // Save file name for update_efi_file()
 
             printf("Overwriting EFI/BOOT/ with file '%s'\n", argv[i]);
 
@@ -437,22 +438,22 @@ void update_efi_file(FILE *image_file, FILE *efi_file, char *file_name) {
     vbr_t vbr;
     uint64_t file_size, file_size_sectors;
     uint32_t cluster = 0;
-    uint8_t file_buf[512];
+    uint8_t file_buf[sector_size];
     fat32_dir_entry_short_name_t dir_entry;
 
     // Get LBA of EFI system partitition
     fseek(image_file, sizeof(mbr_t), SEEK_SET);
-    fread(&gpt_header, sizeof gpt_header, 1, image_file);
+    assert(fread(&gpt_header, 1, sizeof gpt_header, image_file) == sizeof gpt_header);
     fseek(image_file, gpt_header.partition_entries_start_LBA*512, SEEK_SET);
 
-    fread(&part, sizeof part, 1, image_file);
+    assert(fread(&part, 1, sizeof part, image_file) == sizeof part);
     while (memcmp(&part.partition_type_GUID, &efi_system_partition, sizeof(gpt_guid_t)) != 0) 
-        fread(&part, sizeof part, 1, image_file);
+        assert(fread(&part, 1, sizeof part, image_file) == sizeof part);
     
     fseek(image_file, part.first_LBA*512, SEEK_SET);
 
     // Go to FATs
-    fread(&vbr, sizeof vbr, 1, image_file);
+    assert(fread(&vbr, 1, sizeof vbr, image_file) == sizeof vbr);
     const uint64_t FAT1_LBA = part.first_LBA + vbr.reserved_logical_sectors;
     const uint64_t FAT2_LBA = FAT1_LBA + vbr.logical_sectors_per_FAT_EBPB;
     fseek(image_file, FAT1_LBA*512, SEEK_SET);
@@ -474,12 +475,12 @@ void update_efi_file(FILE *image_file, FILE *efi_file, char *file_name) {
         fwrite(&cluster, sizeof cluster, 1, image_file); 
 
     // Overwrite remaining clusters with 0s, in case this efi_file is smaller than previous one
-    fread(&cluster, sizeof cluster, 1, image_file);
+    assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);
     while (cluster != 0) {
         fseek(image_file, -(sizeof cluster), SEEK_CUR); // Move back
         cluster = 0;
         fwrite(&cluster, sizeof cluster, 1, image_file);   // Overwrite with 0s
-        fread(&cluster, sizeof cluster, 1, image_file);    // Move forward to next cluster
+        assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);    // Move forward to next cluster
     }
 
     // FAT2
@@ -494,12 +495,12 @@ void update_efi_file(FILE *image_file, FILE *efi_file, char *file_name) {
         fwrite(&cluster, sizeof cluster, 1, image_file); 
 
     // Overwrite remaining clusters with 0s, in case this efi_file is smaller than previous one
-    fread(&cluster, sizeof cluster, 1, image_file);
+    assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);
     while (cluster != 0) {
         fseek(image_file, -(sizeof cluster), SEEK_CUR); // Move back
         cluster = 0;
         fwrite(&cluster, sizeof cluster, 1, image_file);   // Overwrite with 0s
-        fread(&cluster, sizeof cluster, 1, image_file);    // Move forward to next cluster
+        assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);    // Move forward to next cluster
     }
 
     // Go to /EFI/BOOT/ directory in image_file
@@ -526,12 +527,12 @@ void update_efi_file(FILE *image_file, FILE *efi_file, char *file_name) {
 
     // Write efi_file data
     for (uint32_t i = 0; i < file_size_sectors; i++) {
-        fread(&file_buf, sizeof file_buf, 1, efi_file);
+        assert(fread(&file_buf, 1, sizeof file_buf, efi_file) == sizeof file_buf);
         fwrite(&file_buf, sizeof file_buf, 1, image_file);
     }
 
     if (file_size % 512 > 0) { // Partial sector data
-        fread(&file_buf, (file_size % 512), 1, efi_file);
+        assert(fread(&file_buf, 1, (file_size % 512), efi_file) == (file_size % 512));
         fwrite(&file_buf, (file_size % 512), 1, image_file);
     }
 
@@ -547,12 +548,12 @@ void update_data_file(FILE *image_file, FILE *data_file) {
 
     // Get LBA of basic data partitition
     fseek(image_file, sizeof(mbr_t), SEEK_SET);
-    fread(&gpt_header, sizeof gpt_header, 1, image_file);
+    assert(fread(&gpt_header, 1, sizeof gpt_header, image_file) == sizeof gpt_header);
     fseek(image_file, gpt_header.partition_entries_start_LBA*512, SEEK_SET);
 
-    fread(&part, sizeof part, 1, image_file);
+    assert(fread(&part, 1, sizeof part, image_file) == sizeof part);
     while (memcmp(&part.partition_type_GUID, &tmp_guid, sizeof(gpt_guid_t)) != 0) 
-        fread(&part, sizeof part, 1, image_file);
+        assert(fread(&part, 1, sizeof part, image_file) == sizeof part);
     
     fseek(image_file, part.first_LBA*512, SEEK_SET);
 
@@ -573,19 +574,18 @@ void update_data_file(FILE *image_file, FILE *data_file) {
     fseek(image_file, part.first_LBA*512, SEEK_SET);
 
     for (uint64_t i = 0; i < file_size_sectors; i++) {
-        fread(&file_buf, sizeof file_buf, 1, data_file);
+        assert(fread(&file_buf, 1, sizeof file_buf, data_file) == sizeof file_buf);
         fwrite(&file_buf, sizeof file_buf, 1, image_file);
     }
 
     if (file_size % 512 > 0) { // Partial sector data
-        fread(&file_buf, (file_size % 512), 1, data_file);
+        assert(fread(&file_buf, 1, (file_size % 512), data_file) == (file_size % 512));
         fwrite(&file_buf, (file_size % 512), 1, image_file);
     }
 }
 
 int main(int argc, char *argv[]) {
     /* NOTE: fopen uses "rb" & "wb" to read/write binary, which fixes some odd issues on byte conversions and file seeking here and there */
-    const size_t sector_size = 512;
     const uint32_t image_sectors = 0x80000;     // 0x80000*512 = 256MB
     const int first_usable_sector = 0x22;
     const int header_sectors = 16384/sector_size;
@@ -937,12 +937,12 @@ int main(int argc, char *argv[]) {
 
         uint8_t file_buf[512];
         for (int i = 0; i < bootloader_file_size_sectors; i++) {
-            fread(file_buf, sizeof file_buf, 1, bootloader);
+            assert(fread(file_buf, 1, sizeof file_buf, bootloader) == sizeof file_buf);
             fwrite(file_buf, sizeof file_buf, 1, opts.image_file);
         }
 
         if ((bootloader_file_size % 512) > 0) {     // Write rest of partial sector data
-            fread(file_buf, bootloader_file_size % 512, 1, bootloader);
+            assert(fread(file_buf, 1, bootloader_file_size % 512, bootloader) == bootloader_file_size % 512);
             fwrite(file_buf, bootloader_file_size % 512, 1, opts.image_file);
         }
 
@@ -965,12 +965,12 @@ int main(int argc, char *argv[]) {
         rewind(opts.data_file);
 
         for (uint64_t i = 0; i < file_size_sectors; i++) {
-            fread(&file_buf, sizeof file_buf, 1, opts.data_file);
+            assert(fread(&file_buf, 1, sizeof file_buf, opts.data_file) == sizeof file_buf);
             fwrite(&file_buf, sizeof file_buf, 1, opts.image_file);
         }
 
         if (file_size % 512 > 0) { // Partial sector data
-            fread(&file_buf, (file_size % 512), 1, opts.data_file);
+            assert(fread(&file_buf, 1, (file_size % 512), opts.data_file) == (file_size % 512));
             fwrite(&file_buf, (file_size % 512), 1, opts.image_file);
         }
 
