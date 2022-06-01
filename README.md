@@ -32,12 +32,15 @@ This will write a new image file with the default name 'test.img'.
 
 ### Expanded:
 ```console
-[-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]]
--h --help: Print this message
-image_name: Name of output GPT disk image file
--ue --update-efi: Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition
+write_gpt [-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]
+          [-es --efi-size efi_size] [-ds --data-size data_size]]
+-h --help:         Print this message
+image_name:        Name of output GPT disk image file
+-ue --update-efi:  Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition
 -ud --update-data: Update/overwrite file_name in the basic data partition
--ad --add-data: Add file_name to the basic data partition in a new image file
+-ad --add-data:    Add file_name to the basic data partition in the created image file
+-es --efi-size:    Set the size of the EFI System Partition in MB; Minimum size of 32 for FAT32
+-ds --data-size:   Set the size of the Basic Data Partition in MB; Minimum size of 0 for empty/no data partition
 ```
 
 Multi-dash options are aliases for the single dash options i.e. -ue is the same as --update-efi. \

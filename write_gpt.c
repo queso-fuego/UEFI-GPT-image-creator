@@ -185,6 +185,9 @@ const gpt_guid_t efi_system_partition = {0xC12A7328, 0xF81F, 0x11D2, 0xBA, 0x4B,
 const gpt_guid_t microsoft_basic_data_partition = {0xEBD0A0A2, 0xB9E5, 0x4433, 0x87, 0xC0, {0x68,0xB6,0xB7,0x26,0x99,0xC7}};
 const size_t sector_size = 512;
 
+uint64_t efi_size_sectors = 0x14000;        // Default EFI system partition size in sectors: 40MB
+uint64_t data_size_sectors = 0x6B800;       // Default data partition size in sectors: 215MB
+
 // Can also use premade table
 //uint32_t crc32_table[256] = {
 //    0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA, 0x076DC419, 0x706AF48F, 0xE963A535, 0x9E6495A3,
@@ -321,6 +324,10 @@ void get_opts(int argc, char *argv[], options_t *opts) {
             }
 
             opts->image_file = fopen(argv[i], "r+"); // Open file at beginning, for reading & writing, but DO NOT TRUNCATE!
+
+            if (!opts->image_file)
+                opts->image_file = fopen(argv[i], "wb"); // New file
+
             image_argc = i; // Save argc value for later opts in case those opts work for new files
 
             printf("Writing image '%s'\n", argv[i]);
@@ -337,16 +344,16 @@ void get_opts(int argc, char *argv[], options_t *opts) {
                 fprintf(stderr, "Must provide file_name to update in EFI system partition\n");
                 opts->error = true;
                 return;
-            } else {
-                opts->efi_file = fopen(argv[i], "rb");
-                if (!opts->efi_file) {
-                    fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
-                    opts->error = true;
-                    return;
-                }
+            } 
+
+            opts->efi_file = fopen(argv[i], "rb");
+            if (!opts->efi_file) {
+                fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
+                opts->error = true;
+                return;
             }
 
-            if (!opts->image_file) {
+            if (image_argc == 0) {
                 fprintf(stderr, "Must provide image_name to update file_name in\n");
                 opts->error = true;
                 return;
@@ -370,16 +377,16 @@ void get_opts(int argc, char *argv[], options_t *opts) {
                 fprintf(stderr, "Must provide file_name to update in basic data partition\n");
                 opts->error = true;
                 return;
-            } else {
-                opts->data_file = fopen(argv[i], "rb");
-                if (!opts->data_file) {
-                    fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
-                    opts->error = true;
-                    return;
-                }
+            } 
+
+            opts->data_file = fopen(argv[i], "rb");
+            if (!opts->data_file) {
+                fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
+                opts->error = true;
+                return;
             }
 
-            if (!opts->image_file) {
+            if (image_argc == 0) {
                 fprintf(stderr, "Must provide image_name to update file_name in\n");
                 opts->error = true;
                 return;
@@ -395,25 +402,20 @@ void get_opts(int argc, char *argv[], options_t *opts) {
                 fprintf(stderr, "Must provide file_name to add to basic data partition\n");
                 opts->error = true;
                 return;
-            } else {
-                opts->data_file = fopen(argv[i], "rb");
-                if (!opts->data_file) {
-                    fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
-                    opts->error = true;
-                    return;
-                }
             }
 
-            if (!opts->image_file) {
-                // Assuming writing a new image
-                if (image_argc == 0) {
-                    // Did not provide name for image file yet
-                    fprintf(stderr, "Must provide image_name to add file_name to\n");
-                    opts->error = true;
-                    return;
-                }
+            opts->data_file = fopen(argv[i], "rb");
+            if (!opts->data_file) {
+                fprintf(stderr, "File '%s' does not exist.\n", argv[i]);
+                opts->error = true;
+                return;
+            }
 
-                opts->image_file = fopen(argv[image_argc], "wb");
+            if (image_argc == 0) {
+                // Did not provide name for image file yet
+                fprintf(stderr, "Must provide image_name to add file_name to\n");
+                opts->error = true;
+                return;
             }
 
             if (opts->update_efi || opts->update_data) {
@@ -424,6 +426,41 @@ void get_opts(int argc, char *argv[], options_t *opts) {
 
             opts->add_data = true;
             printf("Adding file '%s' to basic data partition\n", argv[i]);
+
+        } else if (!strcmp(argv[i], "-es") || !strcmp(argv[i], "--efi-size")) {
+            // Set the size of the EFI system partition, in MB
+            // MINIMUM SIZE OF ~32MB for FAT32! 512 bytes/sector * 1 sector/cluster * 65525 clusters = 33,548,800; 32MB = 33,554,432
+            i++;
+            if (!argv[i]) {
+                fprintf(stderr, "Must provide efi_size in MB\n");
+                opts->error = true;
+                return;
+            }
+
+            const uint64_t size = strtol(argv[i], NULL, 0);
+
+            if (size < 32) {
+                fprintf(stderr, "efi_size must be >= 32 as 32MB is the minimum size of a valid FAT32 partition\n");
+                opts->error = true;
+                return;
+            }
+
+            // Set efi_size_sectors; Convert input MB to sectors (convert to MB and divide by 512 bytes)
+            efi_size_sectors = (size*1048576)/512;
+            
+        } else if (!strcmp(argv[i], "-ds") || !strcmp(argv[i], "--data-size")) {
+            // Set the size of the basic data partition, in MB (for your OS or other things)
+            i++;
+            if (!argv[i]) {
+                fprintf(stderr, "Must provide data_size in MB\n");
+                opts->error = true;
+                return;
+            }
+
+            const uint64_t size = strtol(argv[i], NULL, 0);
+
+            // Set data_size_sectors; Convert input MB to sectors (convert to MB and divide by 512 bytes)
+            data_size_sectors = (size*1048576)/512;
         }
     }
 }
@@ -558,11 +595,8 @@ void update_data_file(FILE *image_file, FILE *data_file) {
     fseek(image_file, part.first_LBA*512, SEEK_SET);
 
     // Overwrite data partition with 0s
-    uint64_t data_size = part.last_LBA - part.first_LBA + 1;
-    uint64_t data_size_sectors = data_size / 512;
-    if (data_size % 512 > 0) data_size_sectors++;
-
-    for (uint64_t i = 0; i < data_size_sectors; i++)
+    const uint64_t data_size_LBAs = part.last_LBA - part.first_LBA + 1;
+    for (uint64_t i = 0; i < data_size_LBAs; i++)
         fwrite(&file_buf, sizeof file_buf, 1, image_file);
 
     // Write data_file to data partition
@@ -586,16 +620,20 @@ void update_data_file(FILE *image_file, FILE *data_file) {
 
 int main(int argc, char *argv[]) {
     /* NOTE: fopen uses "rb" & "wb" to read/write binary, which fixes some odd issues on byte conversions and file seeking here and there */
-    const uint32_t image_sectors = 0x80000;     // 0x80000*512 = 256MB
     const int first_usable_sector = 0x22;
-    const int header_sectors = 16384/sector_size;
-    const int secondary_headers_sector = image_sectors - 1 - header_sectors;
-    const int secondary_gpt_sector = image_sectors-1;
-    const int part_count = 128;                 // Number of partition entries
+    const int header_sectors = 16384/sector_size;   // Minimum size of GPT partition array
+    const int part_count = 128;                     // Number of partition entries
     const uint64_t first_part_LBA = 0x80;
-    const uint64_t efi_size_sectors = 0x14000;  // 0x14000*512 = 40MB
-    const uint64_t data_size_sectors = 0x6B800; // 0x6B800*512 = 215MB
-    const int max_opts = 6;
+    const int max_opts = 9;
+    const char help_text[] = "Usage: %s [-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]\n"
+                             "          [-es --efi-size efi_size] [-ds --data-size data_size]]\n"
+                             "-h --help:         Print this message\n"
+                             "image_name:        Name of output GPT disk image file\n"
+                             "-ue --update-efi:  Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition\n"
+                             "-ud --update-data: Update/overwrite file_name in the basic data partition\n"
+                             "-ad --add-data:    Add file_name to the basic data partition in the created image file\n"
+                             "-es --efi-size:    Set the size of the EFI System Partition in MB; Minimum size of 32 for FAT32\n"
+                             "-ds --data-size:   Set the size of the Basic Data Partition in MB; Minimum size of 0 for empty/no data partition\n";
 
     uint32_t bootloader_file_size;
     int bootloader_file_size_sectors;
@@ -611,27 +649,19 @@ int main(int argc, char *argv[]) {
     };
 
     if (argc > max_opts) {
-        fprintf(stderr, "Usage: %s [-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]]\n"
-                        "-h --help: Print this message\n"
-                        "image_name: Name of output GPT disk image file\n"
-                        "-ue --update-efi: Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition\n"
-                        "-ud --update-data: Update/overwrite file_name in the basic data partition\n"
-                        "-ad --add-data: Add file_name to the basic data partition in a new image file\n"
-                        , argv[0]);
+        fprintf(stderr, help_text, argv[0]);
         return EXIT_FAILURE;
     }
 
     // Grab command line args
     get_opts(argc, argv, &opts);
 
+    uint64_t image_sectors = efi_size_sectors + data_size_sectors + 0x800;    // 1MB buffer
+    int secondary_headers_sector = image_sectors - 1 - header_sectors;
+    int secondary_gpt_sector = image_sectors-1;
+
     if (opts.help) {
-        fprintf(stderr, "Usage: %s [-h --help] [image_name [-ue --update-efi file_name] [-ud --update-data file_name] [-ad --add-data file_name]]\n"
-                        "-h --help: Print this message\n"
-                        "image_name: Name of output GPT disk image file\n"
-                        "-ue --update-efi: Update/overwrite file_name in the /EFI/BOOT/ directory of the EFI system partition\n"
-                        "-ud --update-data: Update/overwrite file_name in the basic data partition\n"
-                        "-ad --add-data: Add file_name to the basic data partition in the created image file\n"
-                        , argv[0]);
+        fprintf(stderr, help_text, argv[0]);
         return EXIT_SUCCESS;
     }
 
@@ -642,6 +672,8 @@ int main(int argc, char *argv[]) {
         opts.image_file = fopen("test.img", "wb");
         puts("Writing default image 'test.img'");
     }
+
+    printf("EFI System Partition size: %luMB, Basic Data Partition size: %luMB\n", (efi_size_sectors*512)/1048576, (data_size_sectors*512)/1048576);
 
     if (opts.update_efi) {
         update_efi_file(opts.image_file, opts.efi_file, opts.efi_file_name);
