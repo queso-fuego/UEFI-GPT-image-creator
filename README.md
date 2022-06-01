@@ -50,4 +50,4 @@ Multi-dash options are aliases for the single dash options i.e. -ue is the same 
 If no image name is provided, a default `test.img` file is created. 
 
 ## Example
-![Example screenshot](./example.png "Showing an example of running a generated image in qemu.")
+![Example screenshot](./example_6-01-22.png "Showing an example of running a generated image in qemu.")
