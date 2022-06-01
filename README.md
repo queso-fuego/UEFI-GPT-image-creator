@@ -8,9 +8,10 @@ Purpose is to aid in UEFI development speed, and reduce dependencies on other pr
 
 - Verified GPT status of output images with gdisk (gdisk64 on windows) and qemu with OVMF.
 
-- Program Tested on FreeBSD and Windows 10
+- Program Tested on Ubuntu, FreeBSD, and Windows 10
 
-Currently limited to 256MB in size, with a 40MB EFI system partition, and a 215 MB empty Basic Data partition for use with other developments.
+The image contains an EFI System Partition with a default size of 40MB, and an empty Basic Data Partition with a default size of 215MB for use with other developments.
+The size of both can be changed with command line parameters, see **Usage** section below.
 
 If the file `BOOTX64.EFI` is in the current directory when `write_gpt` is ran, that file will be added to the `/EFI/BOOT/` folder in the ESP.
 If that file is not found, `/EFI/BOOT/` will be empty in the created image.
@@ -28,7 +29,7 @@ Linux/BSD: `./build.sh`
 Windows: `write_gpt [image_name]` \
 Linux/BSD: `./write_gpt [image_name]` 
 
-This will write a new image file with the default name 'test.img'.
+This will write a new image file with the default name `test.img`.
 
 ### Expanded:
 ```console
@@ -46,7 +47,7 @@ image_name:        Name of output GPT disk image file
 Multi-dash options are aliases for the single dash options i.e. -ue is the same as --update-efi. \
 -ad or --add-data will only add `file_name` to a *new* image file. Existing files should use -ud or --update-data instead. \
 -ad can not be used with -ue/-ud. \
-If no image name is provided, a default 'test.img' file is created. 
+If no image name is provided, a default `test.img` file is created. 
 
 ## Example
 ![Example screenshot](./example.png "Showing an example of running a generated image in qemu.")
