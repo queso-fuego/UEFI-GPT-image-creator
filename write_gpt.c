@@ -185,8 +185,9 @@ const gpt_guid_t efi_system_partition = {0xC12A7328, 0xF81F, 0x11D2, 0xBA, 0x4B,
 const gpt_guid_t microsoft_basic_data_partition = {0xEBD0A0A2, 0xB9E5, 0x4433, 0x87, 0xC0, {0x68,0xB6,0xB7,0x26,0x99,0xC7}};
 const size_t sector_size = 512;
 
-uint64_t efi_size_sectors = 0x14000;        // Default EFI system partition size in sectors: 40MB
-uint64_t data_size_sectors = 0x6B800;       // Default data partition size in sectors: 215MB
+// Instead of uint64_t, this is needed to use %llu on both windows and linux
+unsigned long long efi_size_sectors = 0x14000;  // Default EFI system partition size in sectors: 40MB
+unsigned long long data_size_sectors = 0x6B800; // Default data partition size in sectors: 215MB
 
 // Can also use premade table
 //uint32_t crc32_table[256] = {
@@ -514,7 +515,7 @@ void update_efi_file(FILE *image_file, FILE *efi_file, char *file_name) {
     // Overwrite remaining clusters with 0s, in case this efi_file is smaller than previous one
     assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);
     while (cluster != 0) {
-        fseek(image_file, -(sizeof cluster), SEEK_CUR); // Move back
+        fseek(image_file, -4, SEEK_CUR); // Move back 1 cluster
         cluster = 0;
         fwrite(&cluster, sizeof cluster, 1, image_file);   // Overwrite with 0s
         assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);    // Move forward to next cluster
@@ -534,7 +535,7 @@ void update_efi_file(FILE *image_file, FILE *efi_file, char *file_name) {
     // Overwrite remaining clusters with 0s, in case this efi_file is smaller than previous one
     assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);
     while (cluster != 0) {
-        fseek(image_file, -(sizeof cluster), SEEK_CUR); // Move back
+        fseek(image_file, -4, SEEK_CUR); // Move back 1 cluster
         cluster = 0;
         fwrite(&cluster, sizeof cluster, 1, image_file);   // Overwrite with 0s
         assert(fread(&cluster, 1, sizeof cluster, image_file) == sizeof cluster);    // Move forward to next cluster
@@ -690,7 +691,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Writing new file from this point on, show size of partitions to user
-    printf("EFI System Partition size: %luMB, Basic Data Partition size: %luMB\n", (efi_size_sectors*512)/1048576, (data_size_sectors*512)/1048576);
+    printf("EFI System Partition size: %lluMB, Basic Data Partition size: %lluMB\n", (efi_size_sectors*512)/1048576, (data_size_sectors*512)/1048576);
 
     // Seed rng for GUID values later
     time_t t;
