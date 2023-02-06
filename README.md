@@ -20,6 +20,9 @@ A valid OVMF file for qemu is included as `bios64.bin`. Use it with qemu as `-bi
 
 `qemu.bat`/`qemu.sh` is included as an example, change the drive and bios names as needed, as well as any other parms.
 
+## Dependencies
+C compiler with support for C11 or higher, for UTF-16 string literals/u"" strings
+
 ## Build
 Windows: `build` \
 Linux/BSD: `./build.sh` 

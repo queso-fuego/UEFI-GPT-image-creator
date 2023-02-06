@@ -18,9 +18,13 @@
  * https://www.w3.org/TR/PNG/#D-CRCAppendix
  * https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system
  * https://wiki.osdev.org/FAT
- * UEFI 2.9 spec 
- * and 'mkgpt' source 
+ * UEFI 2.9 spec https://uefi.org/specifications
+ * mkgpt source: https://github.com/jncronin/mkgpt
+ *
+ * and help from others :)
  */ 
+
+typedef uint_least16_t char16_t;        // Per C11 standard, equivalent type to char16_t for utf-16
 
 // MBR partition entry
 typedef struct {
@@ -75,7 +79,7 @@ typedef struct {
     uint64_t first_LBA;
     uint64_t last_LBA;
     uint64_t attribute_flags;
-    uint16_t partition_name[36];    // UTF-16LE
+    char16_t partition_name[36];    // UTF-16LE
 } __attribute__ ((packed)) partition_entry_t;
 
 // FAT32 boot sector/VBR
