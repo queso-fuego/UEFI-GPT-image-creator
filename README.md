@@ -61,11 +61,12 @@ options:
 -ad --add-data-file    Add a file to the basic data partition, and create a
                        <FILENAME.INF> file under '/EFI/BOOT/' in the ESP.
 -v  --vhd              Create a fixed vhd footer, and add it to the end of the
-                       disk image. The image name will have a .vhd suffix.);
+                       disk image. The image name will have a .vhd suffix.
 ```
 
 -ae/--add-esp-file and -ad/--add-data will add `file_name` to the *new* image file each time. They do not update an existing image.
 If no image name is provided, a default name `test.img` will be used.
 
 ## Example
-![Example screenshot](./example_6-01-22.png "Showing an example of running a generated image in qemu.")
+![Example1](./example_1_2023-04-24.png "Showing an example of creating an generated image and running in qemu.")
+![Example2](./example_2_2023-04-24.png "Showing an example of sgdisk output on a generated image.")
