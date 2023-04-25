@@ -1224,11 +1224,11 @@ int main(int argc, char *argv[]) {
 
     // Print image info 
     printf("Image Name: %s\n"
-           "LBA Size: %" PRIu64 "\n"
-           "EFI System Partition Size: %luMiB\n"
-           "Basic Data Partition Size: %luMiB\n"
-           "Extra padding for MBR/GPT Headers/GPT Tables: %luMiB\n" 
-           "Total Image Size: %luMiB\n",
+           "LBA Size: %"PRIu64"\n"
+           "EFI System Partition Size: %"PRIu64"MiB\n"
+           "Basic Data Partition Size: %"PRIu64"MiB\n"
+           "Extra padding for MBR/GPT Headers/GPT Tables: %"PRIu64"MiB\n" 
+           "Total Image Size: %"PRIu64"MiB\n",
            image_name,
            lba_size,
            esp_size / MEGABYTE_SIZE, 
@@ -1288,7 +1288,7 @@ int main(int argc, char *argv[]) {
     char *buf = malloc(lba_size); 
     memset(buf, 0, sizeof lba_size);  
     
-    sprintf(buf, "DISK_SIZE=%lu\n", image_size);
+    sprintf(buf, "DISK_SIZE=%"PRIu64"\n", image_size);
     fwrite(buf, 1, lba_size, new_file);
     rewind(new_file);
     free(buf);
@@ -1383,8 +1383,8 @@ int main(int argc, char *argv[]) {
         const uint64_t data_lba = next_aligned_lba(ESP_lba + esp_size_lbas);
 
         sprintf(buf, 
-                "FILE_SIZE=%lu\n"
-                "DISK_LBA=%lu\n",
+                "FILE_SIZE=%"PRIu64"\n"
+                "DISK_LBA=%"PRIu64"\n",
                 file_size_bytes,
                 data_lba);
 
