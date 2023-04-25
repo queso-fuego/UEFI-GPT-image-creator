@@ -8,7 +8,7 @@ Its purpose is to aid in UEFI development, and reduce dependencies on other prog
 
 - Verified GPT status of output images with gdisk/sgdisk (gdisk64 on windows) and qemu with OVMF.
 
-The generated image contains an EFI System Partition with a minimum size of ~33MiB for a sector size of 512 bytes, and an empty Basic Data Partition with a default size of 50MiB.
+The generated image contains an EFI System Partition with FAT32 filesystem with a minimum size of ~33MiB for 512 byte sectors, and an empty Basic Data Partition with a default size of 10MiB.
 The data partition can be used to hold a file such as an OS or kernel binary.
 
 The size of both partitions can be changed with command line parameters, see **Usage** section below.
