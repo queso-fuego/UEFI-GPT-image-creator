@@ -1115,7 +1115,7 @@ bool add_vhd(const uint64_t image_size, FILE *image) {
 // ========================================================
 int main(int argc, char *argv[]) {
     char image_name[BUFSIZ] = "test.img";
-    char file_name[BUFSIZ] = "BOOTX64.EFI";
+    char file_name[BUFSIZ] = { 0 };
     FILE *fp = NULL;
 
     // Get options/flags from user input command line flags
@@ -1189,8 +1189,8 @@ int main(int argc, char *argv[]) {
         // Add .vhd suffix to image name
         char *pos = strrchr(image_name, '.');
         if (!pos) {
-            // Concat .inf to end of name
-            pos = file_name + strlen(file_name);
+            // Concat .inf to end of image name
+            pos = image_name + strlen(image_name);
         } 
          
         *pos = '\0';
@@ -1269,6 +1269,7 @@ int main(int argc, char *argv[]) {
     // If BOOTX64.EFI file is found in current directory, then
     //  add it automatically to the ESP
     // '/EFI/BOOT/BOOTX64.EFI'
+    strcpy(file_name, "BOOTX64.EFI");
     FILE *new_file = fopen(file_name, "rb");
     char path[BUFSIZ] = "/EFI/BOOT/BOOTX64.EFI";
     if (new_file) {
