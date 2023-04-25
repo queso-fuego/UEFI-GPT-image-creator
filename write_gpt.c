@@ -1013,14 +1013,16 @@ bool add_vhd(const uint64_t image_size, FILE *image) {
 
     // Fill out VHD info
     Vhd vhd = {
-        .cookie = { "QFWUZHER" },
+        //.cookie = { "QFWUZHER" },
+        .cookie = { "conectix" },   // Microsoft needs this to be a valid VHD footer
         .features = { 0 },
         .file_format_version = { 0x00,0x01,0x00,0x00 },
         .data_offset = { 0xFF,0xFF,0xFF,0xFF },     // Fixed disk
         .time_stamp = { 0 },                        // # of seconds since jan 1st, 2000
         .creator_application = { "qfic" },
         .creator_version = { 0x00,0x01,0x00,0x00 },
-        .creator_host_os = { 0x00,0xC0,0xFF, 0xEE },
+        //.creator_host_os = { 0x00,0xC0,0xFF, 0xEE },  
+        .creator_host_os = { 0x57,0x69,0x32, 0x6B },  // Wi2k for windows/microsoft
         .original_size = { 0 },
         .current_size = { 0 },
         .disk_geometry = { 0 },                     // CHS value
@@ -1287,7 +1289,7 @@ int main(int argc, char *argv[]) {
     new_file = fopen(file_name, "w+");
     strcpy(path, "/EFI/BOOT/DSKIMG.INF");
     char *buf = malloc(lba_size); 
-    memset(buf, 0, sizeof lba_size);  
+    memset(buf, 0, lba_size); 
     
     sprintf(buf, "DISK_SIZE=%"PRIu64"\n", image_size);
     fwrite(buf, 1, lba_size, new_file);
@@ -1376,7 +1378,7 @@ int main(int argc, char *argv[]) {
         strcat(path, file_name);
 
         char *buf = malloc(lba_size); 
-        memset(buf, 0, sizeof lba_size);  
+        memset(buf, 0, lba_size);  
 
         const uint64_t align_lba = PARTITION_ALIGNMENT / lba_size;
         const uint64_t esp_size_lbas = bytes_to_lbas(esp_size);
