@@ -810,7 +810,7 @@ bool add_file_to_esp(char *path, FILE *image, FILE *fp, Volume_Boot_Record vbr) 
     file_lba -= 2;  // Remove first 2 reserved clusters
     fseek(image, (data_lba + file_lba) * lba_size, SEEK_SET);   // Go to sector/lba on disk
 
-    uint8_t *file_data = malloc(lba_size);
+    uint8_t *file_data = calloc(1, lba_size);
 
     for (uint64_t lba = 0; lba < file_size_lbas; lba++) {
         uint64_t bytes_read = fread(file_data, 1, lba_size, fp);
@@ -1288,8 +1288,7 @@ int main(int argc, char *argv[]) {
     strcpy(file_name, "dskimg.inf");
     new_file = fopen(file_name, "w+");
     strcpy(path, "/EFI/BOOT/DSKIMG.INF");
-    char *buf = malloc(lba_size); 
-    memset(buf, 0, lba_size); 
+    char *buf = calloc(1, lba_size); 
     
     sprintf(buf, "DISK_SIZE=%"PRIu64"\n", image_size);
     fwrite(buf, 1, lba_size, new_file);
@@ -1377,8 +1376,7 @@ int main(int argc, char *argv[]) {
         strcpy(path, "/EFI/BOOT/");
         strcat(path, file_name);
 
-        char *buf = malloc(lba_size); 
-        memset(buf, 0, lba_size);  
+        char *buf = calloc(1, lba_size); 
 
         const uint64_t align_lba = PARTITION_ALIGNMENT / lba_size;
         const uint64_t esp_size_lbas = bytes_to_lbas(esp_size);
