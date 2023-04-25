@@ -14,7 +14,7 @@ The data partition can be used to hold a file such as an OS or kernel binary.
 The size of both partitions can be changed with command line parameters, see **Usage** section below.
 
 If the file `BOOTX64.EFI` is in the current directory when `write_gpt` is ran, that file will be added to the `/EFI/BOOT/` directory in the ESP.
-If that file is not found, `/EFI/BOOT/` will be empty in the created image.
+This file is assumed to be an x86_64 EFI Application, and will be booted automatically in QEMU/OVMF or on UEFI compliant hardware.
 
 A `DSKIMG.INF` file will be created containing the size of the generated image, and added to the `/EFI/BOOT/` directory.
 
