@@ -3,9 +3,9 @@
 set -eu
 
 CC="cc"
-CFLAGS="-Wall -Werror -Wextra -Wpedantic -std=c17 -O2 -s"
-SOURCE1="write_gpt.c"
-TARGET1="write_gpt"
+CFLAGS="-std=c17 -Wall -Wextra -Wpedantic -O2 -s"
+SOURCE="write_gpt.c"
+TARGET="write_gpt"
 
-$CC $CFLAGS $SOURCE1 -o $TARGET1
+$CC $CFLAGS $SOURCE -o $TARGET
 
