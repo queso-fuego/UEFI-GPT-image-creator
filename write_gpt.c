@@ -1121,6 +1121,9 @@ int main(int argc, char *argv[]) {
     // Get options/flags from user input command line flags
     Options options = {0};
 
+    if (!getopts(argc, argv, &options)) 
+        return EXIT_FAILURE;
+
     if (options.help) {
         // Print help text
         fprintf(stderr,
@@ -1148,9 +1151,6 @@ int main(int argc, char *argv[]) {
 
         return EXIT_SUCCESS;
     }
-
-    if (!getopts(argc, argv, &options)) 
-        return EXIT_FAILURE;
 
     if (options.lba_size != 0) {
         lba_size = options.lba_size;
