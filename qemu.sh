@@ -7,8 +7,7 @@ qemu-system-x86_64 \
 -m 256M \
 -vga std \
 -name TESTOS \
--machine q35 \
--net none
+-machine q35 
 
 # For testing other drive physical/logical sizes. Although this did not work for me for lba size > 512
 #qemu-system-x86_64 \

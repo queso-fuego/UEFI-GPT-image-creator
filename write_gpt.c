@@ -1013,16 +1013,14 @@ bool add_vhd(const uint64_t image_size, FILE *image) {
 
     // Fill out VHD info
     Vhd vhd = {
-        //.cookie = { "QFWUZHER" },
         .cookie = { "conectix" },   // Microsoft needs this to be a valid VHD footer
         .features = { 0 },
         .file_format_version = { 0x00,0x01,0x00,0x00 },
-        .data_offset = { 0xFF,0xFF,0xFF,0xFF },     // Fixed disk
+        .data_offset = { 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF },     // -1; Fixed disk
         .time_stamp = { 0 },                        // # of seconds since jan 1st, 2000
         .creator_application = { "qfic" },
         .creator_version = { 0x00,0x01,0x00,0x00 },
-        //.creator_host_os = { 0x00,0xC0,0xFF, 0xEE },  
-        .creator_host_os = { 0x57,0x69,0x32, 0x6B },  // Wi2k for windows/microsoft
+        .creator_host_os = { 0x00,0xC0,0xFF, 0xEE },  
         .original_size = { 0 },
         .current_size = { 0 },
         .disk_geometry = { 0 },                     // CHS value
