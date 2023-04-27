@@ -4,3 +4,4 @@ write_gpt*
 *.inf
 *.INF
 *.vhd
+*.txt
