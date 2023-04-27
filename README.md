@@ -23,19 +23,26 @@ This file will be added to the `/EFI/BOOT/` directory in the generated image. Th
 
 A valid OVMF file for qemu is included as `bios64.bin`. Use it with qemu as `-bios bios64.bin`.
 
-`qemu.bat`/`qemu.sh` is included as an example, change the drive, bios, and any other parms as needed.
+`qemu.bat`/`qemu.sh` is included as an example to run the EFI application in the image through emulation; change the drive, bios, and any other parms as needed.
+
+Scripts are provided, assuming packages are installed, to mount and unmount an image file on linux and windows. 
+Linux should use `mnt_image_linux.sh` and `unmnt_image_linux.sh`, which use packages `nbd/nbd-client/qemu-nbd`.
+Windows should use `mnt_vhd_windows_diskpart.bat` and `unmnt_vhd_windows_diskpart.bat`, which uses `diskpart`.
+
+**!! Use caution and do not assume any names or volume numbers for partitions, etc. are valid, and run things manually first to ensure you**
+**are comfortable running them automatically. You may mess up your disks if you aren't careful. !!**
 
 ## Dependencies
 C compiler with support for C17 or higher (or minor changes will be needed), for UTF-16 string literals/u"" strings
 
 ## Build
-Windows: `build` or `make`
-Linux/BSD: `./build.sh` or `make`
+- Windows: `build` or `make`
+- Linux/BSD: `./build.sh` or `make`
 
 ## Usage
 ### Basic:
-Windows: `write_gpt.exe`
-Linux/BSD: `./write_gpt`
+- Windows: `write_gpt.exe`
+- Linux/BSD: `./write_gpt`
 
 This will create a new image file with the default name `test.img`.
 
