@@ -27,7 +27,7 @@ A valid OVMF file for qemu is included as `bios64.bin`. Use it with qemu as `-bi
 
 Scripts are provided, assuming packages are installed, to mount and unmount an image file on linux and windows. 
 Linux should use `mnt_image_linux.sh` and `unmnt_image_linux.sh`, which use packages `nbd/nbd-client/qemu-nbd`.
-Windows should use `mnt_vhd_windows_diskpart.bat` and `unmnt_vhd_windows_diskpart.bat`, which uses `diskpart`.
+Windows should use `mnt_vhd_windows_powershell.ps1`, which uses powershell commands.
 
 **!! Use caution and do not assume any names or volume numbers for partitions, etc. are valid, and run things manually first to ensure you**
 **are comfortable running them automatically. You may mess up your disks if you aren't careful. !!**
