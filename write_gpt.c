@@ -5,6 +5,7 @@
 #include <time.h>
 #include <uchar.h> 
 #include <string.h>
+#include <inttypes.h>
 
 // -------------------------------------
 // Global Typedefs
@@ -142,6 +143,13 @@ typedef enum {
                      ATTR_SYSTEM    | ATTR_VOLUME_ID,
 } FAT32_Dir_Attr;
 
+
+// FAT32 File "types"
+typedef enum {
+    TYPE_DIR,   // Directory
+    TYPE_FILE,  // Regular file
+} File_Type;
+
 // -------------------------------------
 // Global constants, enums
 // -------------------------------------
@@ -170,8 +178,9 @@ uint64_t esp_size = 1024*1024*33;   // 33 MiB
 uint64_t data_size = 1024*1024*1;   // 1 MiB
 uint64_t image_size = 0;
 uint64_t esp_size_lbas = 0, data_size_lbas = 0, image_size_lbas = 0,  
-         gpt_table_lbas = 0;    // Sizes in lbas
-uint64_t align_lba = 0, esp_lba = 0, data_lba = 0;          // Starting LBA values
+         gpt_table_lbas = 0;                              // Sizes in lbas
+uint64_t align_lba = 0, esp_lba = 0, data_lba = 0,
+         fat32_fats_lba = 0, fat32_data_lba = 0;          // Starting LBA values
 
 // =====================================
 // Convert bytes to LBAs
@@ -451,10 +460,13 @@ bool write_esp(FILE *image) {
         .FSI_Reserved1 = { 0 },
         .FSI_StrucSig = 0x61417272,
         .FSI_Free_Count = 0xFFFFFFFF,
-        .FSI_Nxt_Free = 0xFFFFFFFF,
+        .FSI_Nxt_Free = 5,              // First available cluster (value = 0) after /EFI/BOOT
         .FSI_Reserved2 = { 0 },
         .FSI_TrailSig = 0xAA550000,
     };
+
+    fat32_fats_lba = esp_lba + vbr.BPB_RsvdSecCnt;
+    fat32_data_lba = fat32_fats_lba + (vbr.BPB_NumFATs * vbr.BPB_FATSz32);
 
     // Write VBR and FSInfo sector
     fseek(image, esp_lba * lba_size, SEEK_SET);
@@ -489,10 +501,9 @@ bool write_esp(FILE *image) {
 
     // FAT region --------------------------
     // Write FATs (NOTE: FATs will be mirrored)
-    const uint32_t fat_lba = esp_lba + vbr.BPB_RsvdSecCnt;
     for (uint8_t i = 0; i < vbr.BPB_NumFATs; i++) {
         fseek(image, 
-              (fat_lba + (i*vbr.BPB_FATSz32)) * lba_size, 
+              (fat32_fats_lba + (i*vbr.BPB_FATSz32)) * lba_size, 
               SEEK_SET);
 
         uint32_t cluster = 0;
@@ -528,8 +539,7 @@ bool write_esp(FILE *image) {
 
     // Data region --------------------------
     // Write File/Dir data...
-    const uint32_t data_lba = fat_lba + (vbr.BPB_NumFATs * vbr.BPB_FATSz32);
-    fseek(image, data_lba * lba_size, SEEK_SET);
+    fseek(image, fat32_data_lba * lba_size, SEEK_SET);
 
     // Root '/' Directory entries
     // "/EFI" dir entry 
@@ -559,7 +569,7 @@ bool write_esp(FILE *image) {
     fwrite(&dir_ent, sizeof dir_ent, 1, image);
 
     // /EFI Directory entries
-    fseek(image, (data_lba + 1) * lba_size, SEEK_SET);
+    fseek(image, (fat32_data_lba + 1) * lba_size, SEEK_SET);
 
     memcpy(dir_ent.DIR_Name, ".          ", 11);    // "." dir entry, this directory itself
     fwrite(&dir_ent, sizeof dir_ent, 1, image);
@@ -573,7 +583,7 @@ bool write_esp(FILE *image) {
     fwrite(&dir_ent, sizeof dir_ent, 1, image);
 
     // /EFI/BOOT Directory entries
-    fseek(image, (data_lba + 2) * lba_size, SEEK_SET);
+    fseek(image, (fat32_data_lba + 2) * lba_size, SEEK_SET);
 
     memcpy(dir_ent.DIR_Name, ".          ", 11);    // "." dir entry, this directory itself
     fwrite(&dir_ent, sizeof dir_ent, 1, image);
@@ -581,6 +591,238 @@ bool write_esp(FILE *image) {
     memcpy(dir_ent.DIR_Name, "..         ", 11);    // ".." dir entry, parent dir (/EFI dir)
     dir_ent.DIR_FstClusLO = 3;                      // /EFI directory cluster
     fwrite(&dir_ent, sizeof dir_ent, 1, image);
+
+    return true;
+}
+
+// =============================
+// Add a new directory or file to a given parent directory
+// =============================
+bool add_file_to_esp(char *file_name, FILE *image, File_Type type, uint32_t *parent_dir_cluster) {
+    // First grab FAT32 filesystem info for VBR and File System info
+    Vbr vbr = { 0 };
+    fseek(image, esp_lba * lba_size, SEEK_SET);
+    fread(&vbr, sizeof vbr, 1, image);
+
+    FSInfo fsinfo = { 0 };
+    fseek(image, (esp_lba + 1) * lba_size, SEEK_SET);
+    fread(&fsinfo, sizeof fsinfo, 1, image);
+
+    // Get file size if file
+    FILE *new_file = NULL;
+    uint64_t file_size_bytes = 0, file_size_lbas = 0;
+    if (type == TYPE_FILE) {
+        new_file = fopen(file_name, "rb");
+        if (!new_file) return false;
+
+        fseek(new_file, 0, SEEK_END);
+        file_size_bytes = ftell(new_file);
+        file_size_lbas = bytes_to_lbas(file_size_bytes);
+        rewind(new_file);
+    }
+
+    // Get next free cluster in FATs
+    uint32_t next_free_cluster = fsinfo.FSI_Nxt_Free;
+    const uint32_t starting_cluster = next_free_cluster;  // Starting cluster for new dir/file
+
+    // Add new clusters to FATs
+    for (uint8_t i = 0; i < vbr.BPB_NumFATs; i++) {
+        fseek(image, (fat32_fats_lba + (i * vbr.BPB_FATSz32)) * lba_size, SEEK_SET);
+        fseek(image, next_free_cluster * sizeof next_free_cluster, SEEK_CUR);
+
+        uint32_t cluster = fsinfo.FSI_Nxt_Free;
+        next_free_cluster = cluster;
+        if (type == TYPE_FILE) {
+            for (uint64_t lba = 0; lba < file_size_lbas - 1; lba++) {
+                cluster++;  // Each cluster points to next cluster of file data
+                next_free_cluster++;
+                fwrite(&cluster, sizeof cluster, 1, image);
+            }
+        }
+
+        // Write EOC marker cluster, this would be the only cluster added for a directory
+        //   (type == TYPE_DIR)
+        cluster = 0xFFFFFFFF;
+        next_free_cluster++;
+        fwrite(&cluster, sizeof cluster, 1, image);
+    }
+
+    // Update next free cluster in FS Info
+    fsinfo.FSI_Nxt_Free = next_free_cluster;
+    fseek(image, (esp_lba + 1) * lba_size, SEEK_SET);
+    fwrite(&fsinfo, sizeof fsinfo, 1, image); 
+
+    // Go to Parent Directory's data location in data region
+    fseek(image, (fat32_data_lba + *parent_dir_cluster - 2) * lba_size, SEEK_SET);
+
+    // Add new directory entry for this new dir/file at end of current dir_entrys 
+    FAT32_Dir_Entry_Short dir_entry = { 0 };
+
+    fread(&dir_entry, 1, sizeof dir_entry, image);
+    while (dir_entry.DIR_Name[0] != '\0')
+        fread(&dir_entry, 1, sizeof dir_entry, image);
+
+    // sizeof dir_entry = 32, back up to overwrite this empty spot
+    fseek(image, -32, SEEK_CUR);    
+
+    // Check name length for FAT 8.3 naming
+    const char *dot_pos = strchr(file_name, '.');
+    const uint32_t name_len = strlen(file_name);
+    if ((!dot_pos && name_len > 11) || 
+        (dot_pos && name_len > 12)  || 
+        (dot_pos && dot_pos - file_name > 8)) {
+        return false;   // Name is too long or invalid
+    }
+    
+    // Convert name to FAT 8.3 naming
+    // e.g. "FOO.BAR"  -> "FOO     BAR",
+    //      "BA.Z"     -> "BA      Z  ",
+    //      "ELEPHANT" -> "ELEPHANT   "
+    memset(dir_entry.DIR_Name, ' ', 11);    // Start with all spaces, name/ext will be space padded
+
+    if (dot_pos) {
+        uint8_t i = 0;
+        // Name 8 portion of 8.3
+        for (i = 0; i < (dot_pos - file_name); i++)
+            dir_entry.DIR_Name[i] = file_name[i];
+
+        uint8_t j = i;
+        while (i < 8) dir_entry.DIR_Name[i++] = ' ';
+
+        if (file_name[j] == '.') j++;   // Skip dot to get to extension
+
+        // Extension 3 portion of 8.3
+        while (file_name[j])
+            dir_entry.DIR_Name[i++] = file_name[j++];
+
+        while (i < 11) dir_entry.DIR_Name[i++] = ' ';
+    } else {
+        memcpy(dir_entry.DIR_Name, file_name, name_len);
+    }
+
+    if (type == TYPE_DIR) 
+        dir_entry.DIR_Attr = ATTR_DIRECTORY;
+
+    uint16_t fat_time, fat_date;
+    get_fat_dir_entry_time_date(&fat_time, &fat_date);
+    dir_entry.DIR_CrtTime = fat_time;
+    dir_entry.DIR_CrtDate = fat_date;
+    dir_entry.DIR_WrtTime = fat_time;
+    dir_entry.DIR_WrtDate = fat_date;
+
+    dir_entry.DIR_FstClusHI = (starting_cluster >> 16) & 0xFFFF;
+    dir_entry.DIR_FstClusLO = starting_cluster & 0xFFFF;
+
+    if (type == TYPE_FILE)
+        dir_entry.DIR_FileSize = file_size_bytes;
+
+    fwrite(&dir_entry, 1, sizeof dir_entry, image);
+
+    // Go to this new file's cluster's data location in data region
+    fseek(image, (fat32_data_lba + starting_cluster - 2) * lba_size, SEEK_SET);
+
+    // Add new file data
+    // For directory add dir_entrys for "." and ".."
+    if (type == TYPE_DIR) {
+        memcpy(dir_entry.DIR_Name, ".          ", 11);  // "." dir_entry; this directory itself
+        fwrite(&dir_entry, 1, sizeof dir_entry, image);
+
+        memcpy(dir_entry.DIR_Name, "..         ", 11);  // ".." dir_entry; parent directory
+        dir_entry.DIR_FstClusHI = (*parent_dir_cluster >> 16) & 0xFFFF;
+        dir_entry.DIR_FstClusLO = *parent_dir_cluster & 0xFFFF;
+        fwrite(&dir_entry, 1, sizeof dir_entry, image);
+    } else {
+        // For file, add file data
+        uint8_t *file_buf = calloc(1, lba_size);
+        for (uint64_t i = 0; i < file_size_lbas; i++) {
+            // In case last lba is less than a full lba in size, use actual bytes read
+            //   to write file to disk image
+            size_t bytes_read = fread(file_buf, 1, lba_size, new_file);
+            fwrite(file_buf, 1, bytes_read, image);
+        }
+        free(file_buf);
+    }
+
+    // Set dir_cluster for new parent dir, if a directory was just added
+    if (type == TYPE_DIR)
+        *parent_dir_cluster = starting_cluster;
+
+    return true;
+}
+
+// =============================
+// Add a file path to the EFI System Partition;
+//   will add new directories if not found, and
+//   new file at end of path
+// =============================
+bool add_path_to_esp(char *path, FILE *image) {
+    // Parse input path for each name
+    if (*path != '/') return false; // Path must begin with root '/'
+
+    File_Type type = TYPE_DIR;
+    char *start = path + 1; // Skip initial slash
+    char *end = start;
+    uint32_t dir_cluster = 2;   // Next directory's cluster location; start at root
+
+    // Get next name from path, until reached end of path for file to add
+    while (type == TYPE_DIR) {
+        while (*end != '/' && *end != '\0') end++;
+
+        if (*end == '/') type = TYPE_DIR;
+        else             type = TYPE_FILE;  // Reached end of path
+
+        *end = '\0';    // Null terminate next name in case of directory
+
+        // Search for name in current directory's file data (dir_entrys)
+        FAT32_Dir_Entry_Short dir_entry = { 0 };
+        bool found = false;
+        fseek(image, (fat32_data_lba + dir_cluster - 2) * lba_size, SEEK_SET);
+        do {
+            fread(&dir_entry, 1, sizeof dir_entry, image);
+            if (!memcmp(dir_entry.DIR_Name, start, strlen(start))) {
+                // Found name in directory, save cluster for last directory found
+                dir_cluster = (dir_entry.DIR_FstClusHI << 16) | dir_entry.DIR_FstClusLO;
+                found = true;
+                break;
+            }
+        } while (dir_entry.DIR_Name[0] != '\0');
+
+        if (!found) {
+            // Add new directory or file to last found directory
+            if (!add_file_to_esp(start, image, type, &dir_cluster))
+                return false;
+        }
+
+        *end++ = '/';
+        start = end;
+    }
+
+    // Show info to user
+    printf("Added '%s'\n", path);
+
+    return true;
+}
+
+// =============================
+// Add disk image info file to hold at minimum the size of this disk image
+// =============================
+bool add_disk_image_info_file(FILE *image) {
+    char *file_buf = calloc(1, lba_size);
+    snprintf(file_buf, 
+             lba_size,
+             "DISK_SIZE=%"PRIu64"\n", 
+             image_size);
+
+    FILE *fp = fopen("DSKIMG.INF", "wb");
+    if (!fp) return false;
+
+    fwrite(file_buf, strlen(file_buf), 1, fp);
+    fclose(fp);
+    free(file_buf);
+
+    char path[25] = { 0 };
+    strcpy(path, "/EFI/BOOT/DSKIMG.INF");
+    if (!add_path_to_esp(path, image)) return false;
 
     return true;
 }
@@ -594,6 +836,8 @@ int main(void) {
         fprintf(stderr, "Error: could not open file %s\n", image_name);
         return EXIT_FAILURE;
     }
+
+    FILE *fp = NULL;
 
     // Set sizes & LBA values
     gpt_table_lbas = GPT_TABLE_SIZE / lba_size;
@@ -627,5 +871,35 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    // Check if "BOOTX64.EFI" file exists in current directory, if so automatically
+    //   add it to the ESP
+    fp = fopen("BOOTX64.EFI", "rb"); 
+    if (fp) {
+        fclose(fp);
+        char *path = calloc(1, 25);
+        strcpy(path, "/EFI/BOOT/BOOTX64.EFI");
+        if (!add_path_to_esp(path, image)) 
+            fprintf(stderr, "Error: Could not add file '%s'\n", path);
+        free(path);
+    }
+
+    // Add disk image info file to hold at minimum the size of this disk image;
+    //   this could be used in an EFI application later as part of an installer, for example
+    if (!add_disk_image_info_file(image)) 
+        fprintf(stderr, "Error: Could not add disk image info file to '%s'\n", image_name);
+
     return EXIT_SUCCESS;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
