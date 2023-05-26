@@ -1181,7 +1181,7 @@ void add_fixed_vhd_footer(FILE *image) {
         .original_size = { 0 },
         .current_size = { 0 },
         .disk_geometry = { 0 },
-        .disk_type = { 0x00, 0x00, 0x00, 0x02 },
+        .disk_type = { 0x00, 0x00, 0x00, 0x02 }, // 2 = Fixed hard disk
         .checksum = { 0 },
         .unique_id = new_guid(),
         .saved_state = 0,
@@ -1189,7 +1189,7 @@ void add_fixed_vhd_footer(FILE *image) {
     };
 
     // Unix epoch for 01/01/2000 = 946684800,
-    //  subtract this value from epoc 01/01/1970 to translate
+    //  subtract this value from epoch 01/01/1970 to translate
     //  to correct timestamp
     uint32_t time_u32 = (uint32_t)time(NULL) - 946684800; 
     vhd.timestamp[0] = (time_u32 >> 24) & 0xFF;
@@ -1283,7 +1283,35 @@ int main(int argc, char *argv[]) {
 
     // Set/evaluate values from options
     if (options.help) {
-        // TODO: print help text
+        // Print help/usage text
+        fprintf(stderr,
+                "%s [options]\n"
+                "\n"
+                "options:\n"
+                "-ad --add-data-files   Add local files to the basic data partition, and create\n"
+                "                       a <FILE.INF> file for each one under the directory\n"
+                "                       '/EFI/BOOT/' in the ESP. ex: '-ad ../folderA/fileB.txt'.\n"
+                "-ae --add-esp-files    Add local files to the generated EFI System Partition.\n"
+                "                       File paths must start under root '/' and end with a \n"
+                "                       slash '/', and all dir/file names are limited to FAT 8.3\n"
+                "                       naming. Each file is added in 2 parts; The 1st arg for\n"
+                "                       the path, and the 2nd arg for the file to add to that\n"
+                "                       path. ex: '-ae /EFI/BOOT/ file1.txt' will add the local\n"
+                "                       file 'file1.txt' to the ESP under the path '/EFI/BOOT'.\n"
+                "                       To add multiple files (up to 10), use multiple\n"
+                "                       <path> <file> args after the initial -ae flag.\n"
+                "                       ex: '-ae /DIR1/ FILE1.TXT /DIR2/ FILE2.TXT'.\n"
+                "-ds --data-size        Set the size of the Basic Data Partition in MiB; Minimum\n" 
+                "                       size is 1 MiB\n" 
+                "-es --esp-size         Set the size of the EFI System Partition in MiB\n"
+                "-h  --help             Print this help text\n"
+                "-i  --image-name       Set the image name. Default name is 'test.img'\n"
+                "-l  --lba-size         Set the lba (sector) size in bytes; This is considered\n"
+                "                       experimental, as tools are lacking for proper testing.\n"
+                "                       Valid sizes: 512/1024/2048/4096\n" 
+                "-v  --vhd              Create a fixed vhd footer, and add it to the end of the\n" 
+                "                       disk image. The image name will have a .vhd suffix.\n",
+                argv[0]);
         return EXIT_SUCCESS;
     }
 
@@ -1345,7 +1373,7 @@ int main(int argc, char *argv[]) {
         image_name = buf;
     }
 
-    // Open non-VHD image
+    // Open image file
     image = fopen(image_name, "wb+");
     if (!image) {
         fprintf(stderr, "Error: could not open file %s\n", image_name);
@@ -1438,10 +1466,11 @@ int main(int argc, char *argv[]) {
         add_fixed_vhd_footer(image);
         printf("Added VHD footer\n");
 
-        free(image_name);
+        // Image_name had .vhd concat-ed on in a separate buffer
+        free(image_name);   
     } 
 
-    // File/misc. cleanup
+    // File cleanup
     fclose(image);
 
     return EXIT_SUCCESS;
