@@ -18,8 +18,8 @@ This file is assumed to be an x86_64 EFI Application, and will be booted automat
 
 A `DSKIMG.INF` file will be created containing the size of the generated image, and added to the `/EFI/BOOT/` directory.
 
-If adding a file to the data partition with `-ad <file>` or `--add-data-file <file>`, a `FILENAME.INF` file will be created containing the size of the file and lba (sector) of the data partition.
-This file will be added to the `/EFI/BOOT/` directory in the generated image. The purpose of this is to e.g. find a kernel file for an OS more easily within an EFI application.
+If adding files to the data partition with `-ad <files> --add-data-files <files>`, a `FILE<N>.INF` file will be created for each one containing the file name, size in bytes, and starting lba (disk sector) in the disk image.
+These .INF files will be added to the `/EFI/BOOT/` directory in the ESP. The purpose of this is to e.g. find a kernel file for an OS more easily within an EFI application.
 
 A valid OVMF file for qemu is included as `bios64.bin`. Use it with qemu as `-bios bios64.bin`.
 
@@ -33,7 +33,8 @@ Windows should use `mnt_vhd_windows_powershell.ps1`, which uses powershell comma
 **are comfortable running them automatically. You may mess up your disks if you aren't careful. !!**
 
 ## Dependencies
-C compiler with support for C17 or higher (or minor changes will be needed), for UTF-16 string literals/u"" strings
+C compiler with support for C17 standard or higher (minor changes will be needed if using a standard older than C17), for UTF-16 u"" string literals and uchar.h header.
+Tested with gcc and clang.
 
 ## Build
 - Windows: `build` or `make`
@@ -51,28 +52,32 @@ This will create a new image file with the default name `test.img`.
 write_gpt [options]
 
 options:
--h  --help             Print this help text
--es --esp-size         Set the size of the EFI System Partition in MB
+-ad --add-data-files   Add local files to the basic data partition, and create
+                       a <FILE.INF> file for each one under the directory
+                       '/EFI/BOOT/' in the ESP. ex: '-ad ../folderA/fileB.txt'.
+-ae --add-esp-files    Add local files to the generated EFI System Partition.
+                       File paths must start under root '/' and end with a 
+                       slash '/', and all dir/file names are limited to FAT 8.3
+                       naming. Each file is added in 2 parts; The 1st arg for
+                       the path, and the 2nd arg for the file to add to that
+                       path. ex: '-ae /EFI/BOOT/ file1.txt' will add the local
+                       file 'file1.txt' to the ESP under the path '/EFI/BOOT'
+                       To add multiple files (up to 10), use multiple
+                       <path> <file> args after the initial -ae flag
+                       ex: '-ae /DIR1/ FILE1.TXT /DIR2/ FILE2.TXT'.
 -ds --data-size        Set the size of the Basic Data Partition in MiB; Minimum 
-                       size is 1MiB 
--ls --lba-size         Set the lba (sector) size in bytes; This is considered
-                       experimental, as I lack tools for proper testing.
-                       Valid sizes: 512/1024/2048/4096 
--i  --image-name       Set the image name. Default name is 'test.img'
--ae --add-esp-file     Add a local file to the generated EFI System Partition.
-                       File path must be qualified and quoted, name length
-                       must be <= 8 characters, and file must be under root
-                       ('/'), '/EFI/', or '/EFI/BOOT/'
-                       example: -ae '/EFI/file1.txt' will add local file
-                       './file1.txt' as '/EFI/FILE1.TXT' in the ESP.
--ad --add-data-file    Add a file to the basic data partition, and create a
-                       <FILENAME.INF> file under '/EFI/BOOT/' in the ESP.
--v  --vhd              Create a fixed vhd footer, and add it to the end of the
+                       size is 1 MiB.
+-es --esp-size         Set the size of the EFI System Partition in MiB.
+-h  --help             Print this help text.
+-i  --image-name       Set the image name. Default name is 'test.img'.
+-l  --lba-size         Set the lba (sector) size in bytes; This is considered
+                       experimental, as tools are lacking for proper testing
+                       Valid sizes: 512/1024/2048/4096.
+-v  --vhd              Create a fixed vhd footer, and add it to the end of the 
                        disk image. The image name will have a .vhd suffix.
 ```
 
--ae/--add-esp-file and -ad/--add-data will add `file_name` to the *new* image file each time. They do not update an existing image.
-If no image name is provided, a default name `test.img` will be used.
+-ae/--add-esp-files and -ad/--add-data-files will add files to a *new* image file each time. They do not update an existing images.
 
 ## Example
 ![Example1](./example_1_2023-04-24.png "Showing an example of creating an generated image and running in qemu.")
