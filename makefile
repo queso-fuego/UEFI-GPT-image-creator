@@ -9,5 +9,4 @@ CFLAGS = -std=c17 -Wall -Wextra -Wpedantic -O2
 all: $(TARGET)
 
 clean:
-	rm -f $(TARGET) *.img
-
+	rm -f $(TARGET) *.img *.INF *.vhd

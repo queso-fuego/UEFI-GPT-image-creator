@@ -13,7 +13,7 @@ fi
 doas modprobe nbd
 
 # Create mount point for partition 1 (EFI System Partition)
-doas mkdir /mnt/p1
+doas mkdir -p /mnt/p1
 
 # Connect client to nbd device
 doas nbd-client -c /dev/nbd0
@@ -23,8 +23,8 @@ doas nbd-client -c /dev/nbd0
 # in this case nbd0p1 should be the EFI System Partition
 doas qemu-nbd -c /dev/nbd0 "$IMAGE"
 
-# Wait a sec to ensure nbd0 partitions are made
+# Wait a few secs to ensure nbd0 partitions are made
 sleep 1
 
 # Mount nbd partition 1 (ESP) as read/write to mount point
-doas mount -o rw /dev/nbd0p1 /mnt/p1
+doas mount -t vfat -o rw /dev/nbd0p1 /mnt/p1

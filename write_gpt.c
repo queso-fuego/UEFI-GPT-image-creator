@@ -150,6 +150,44 @@ typedef enum {
     TYPE_FILE,  // Regular file
 } File_Type;
 
+// Common Virtual Hard Disk Footer, for a "fixed" vhd
+// All fields are in network byte order (Big Endian),
+//   since I'm lazy or otherwise a bad programmer,
+//   we'll use byte arrays here
+typedef struct {
+    uint8_t cookie[8];
+    uint8_t features[4];
+    uint8_t version[4];
+    uint64_t data_offset;
+    uint8_t timestamp[4];
+    uint8_t creator_app[4];
+    uint8_t creator_ver[4];
+    uint8_t creator_OS[4];
+    uint8_t original_size[8];
+    uint8_t current_size[8];
+    uint8_t disk_geometry[4];
+    uint8_t disk_type[4];
+    uint8_t checksum[4];
+    Guid unique_id;
+    uint8_t saved_state;
+    uint8_t reserved[427];
+} __attribute__ ((packed)) Vhd;
+
+// Internal Options object for commandline args
+typedef struct {
+    char *image_name;
+    uint32_t lba_size;
+    uint32_t esp_size;
+    uint32_t data_size;
+    char **esp_file_paths;
+    uint32_t num_esp_file_paths;
+    char **data_files;
+    uint32_t num_data_files;
+    bool vhd;
+    bool help;
+    bool error;
+} Options;
+
 // -------------------------------------
 // Global constants, enums
 // -------------------------------------
@@ -431,8 +469,8 @@ bool write_esp(FILE *image) {
         .BPB_TotSec16 = 0,
         .BPB_Media = 0xF8,               // "Fixed" non-removable media; Could also be 0xF0 for e.g. flash drive
         .BPB_FATSz16 = 0,
-        .BPB_SecPerTrk = 0,
-        .BPB_NumHeads = 0,
+        .BPB_SecPerTrk = 0,  
+        .BPB_NumHeads = 0,    
         .BPB_HiddSec = esp_lba - 1,      // # of sectors before this partition/volume
         .BPB_TotSec32 = esp_size_lbas,   // Size of this partition
         .BPB_FATSz32 = (align_lba - reserved_sectors) / 2,  // Align data region on alignment value
@@ -445,7 +483,7 @@ bool write_esp(FILE *image) {
         .BS_DrvNum = 0x80,              // 1st hard drive
         .BS_Reserved1 = 0,
         .BS_BootSig = 0x29,
-        .BS_VolID = { 0 },
+        .BS_VolID = { 0 }, 
         .BS_VolLab = { "NO NAME    " }, // No volume label 
         .BS_FilSysType = { "FAT32   " },
 
@@ -788,7 +826,9 @@ bool add_path_to_esp(char *path, FILE *image) {
         } while (dir_entry.DIR_Name[0] != '\0');
 
         if (!found) {
-            // Add new directory or file to last found directory
+            // Add new directory or file to last found directory;
+            //   if new directory, update current directory cluster to check/use
+            //   for next new files 
             if (!add_file_to_esp(start, image, type, &dir_cluster))
                 return false;
         }
@@ -798,7 +838,7 @@ bool add_path_to_esp(char *path, FILE *image) {
     }
 
     // Show info to user
-    printf("Added '%s'\n", path);
+    printf("Added '%s' to EFI System Partition\n", path);
 
     return true;
 }
@@ -828,19 +868,455 @@ bool add_disk_image_info_file(FILE *image) {
 }
 
 // =============================
-// MAIN
+// Add file to the Basic Data Partition
 // =============================
-int main(void) {
-    FILE *image = fopen(image_name, "wb+");
-    if (!image) {
-        fprintf(stderr, "Error: could not open file %s\n", image_name);
-        return EXIT_FAILURE;
+bool add_file_to_data_partition(char *filepath, FILE *image) {
+    // Will save location of next spot to put a file in
+    static uint64_t starting_lba = 0;
+
+    // Go to data partition
+    fseek(image, (data_lba + starting_lba) * lba_size, SEEK_SET);
+
+    FILE *fp = fopen(filepath, "rb");
+    if (!fp) {
+        fprintf(stderr, "Error: Could not open file '%s'\n", filepath);
+        return false;
     }
 
-    FILE *fp = NULL;
+    // Get file size 
+    uint64_t file_size_bytes = 0, file_size_lbas = 0;
+    fseek(fp, 0, SEEK_END);
+    file_size_bytes = ftell(fp);
+    file_size_lbas = bytes_to_lbas(file_size_bytes);
+    rewind(fp);
+
+    // Check if adding next file will overrun data partition size
+    if ((starting_lba + file_size_lbas) * lba_size >= data_size) {
+        fprintf(stderr, 
+                "Error: Can't add file %s to Data Partition; "
+                "Data Partition size is %"PRIu64 "(%"PRIu64" LBAs) and all files added"
+                "would overrun this size\n",
+                filepath,
+                data_size, data_size_lbas);
+    }
+
+    uint8_t *file_buf = calloc(1, lba_size);
+    for (uint64_t i = 0; i < file_size_lbas; i++) {
+        uint64_t bytes_read = fread(file_buf, 1, lba_size, fp);
+        fwrite(file_buf, 1, bytes_read, image);
+    }
+    free(file_buf);
+    fclose(fp);
+
+    // Print info to user
+    char *name = NULL;
+    char *slash = strrchr(filepath, '/'); 
+    if (!slash) name = filepath;
+    else name = slash + 1;
+
+    printf("Added '%s' from path '%s' to Data Partition\n", 
+           name,
+           filepath);
+
+    // Add info file for each file added 
+    static uint32_t file_num = 0;
+    file_num++;
+    char info_file[11] = { 0 } ;
+    sprintf(info_file, "FILE%u.INF", file_num);
+
+    char info_path[100] = { 0 };
+    sprintf(info_path, "/EFI/BOOT/%s", info_file);
+
+    fp = fopen(info_file, "wb");
+    if (!fp) {
+        fprintf(stderr, "Error: Could not open file '%s'\n", info_file);
+        return false;
+    }
+
+    file_buf = calloc(1, lba_size);
+    snprintf((char *)file_buf,
+             lba_size,
+             "FILE_NAME=%s\n"
+             "FILE_SIZE=%"PRIu64"\n"
+             "DISK_LBA=%"PRIu64"\n",
+             name,
+             file_size_bytes,
+             data_lba + starting_lba);  // Offset from start of data partition
+
+    fwrite(file_buf, 1, strlen((char *)file_buf), fp);
+    fclose(fp);
+
+    if (!add_path_to_esp(info_path, image)) {
+        fprintf(stderr, 
+                "ERROR: Could not add '%s' to ESP\n",
+                info_path);
+        return false;
+    }
+    
+    free(file_buf);
+
+    // Set next spot to write a file at
+    starting_lba += file_size_lbas;
+
+    return true;
+}
+
+// =============================
+// Get/parse input arguments from command line
+// =============================
+Options get_opts(int argc, char *argv[]) {
+    Options options = { 0 };
+
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-h") ||
+            !strcmp(argv[i], "--help")) {
+            // Print help text and exit
+            options.help = true;
+            return options;
+        }
+
+        if (!strcmp(argv[i], "-i") ||
+            !strcmp(argv[i], "--image-name")) {
+            // Set name of image, instead of using default name
+            if (++i >= argc) {
+                options.error = true;
+                return options;
+            }
+
+            options.image_name = argv[i];
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-l") ||
+            !strcmp(argv[i], "--lba-size")) {
+            // Set size of lba/disk sector, instead of default 512 bytes
+            if (++i >= argc) {
+                options.error = true;
+                return options;
+            }
+
+            options.lba_size = strtol(argv[i], NULL, 10);
+
+            if (options.lba_size != 512  &&
+                options.lba_size != 1024 &&
+                options.lba_size != 2048 &&
+                options.lba_size != 4096) {
+                // Error: invalid LBA size
+                fprintf(stderr, "Error: Invalid LBA size, must be one of 512/1024/2048/4096\n");
+                options.error = true;
+                return options;
+            }
+
+            // Enforce minimum size of ESP per LBA size
+            if ((options.lba_size == 512  && options.esp_size < 33)  ||
+                (options.lba_size == 1024 && options.esp_size < 65)  ||
+                (options.lba_size == 2048 && options.esp_size < 129) ||
+                (options.lba_size == 4096 && options.esp_size < 257)) {
+
+                fprintf(stderr, "Error: ESP Must be a minimum of 33/65/129/257 MiB for "
+                                "LBA sizes 512/1024/2048/4096 respectively\n");
+                options.error = true;
+                return options;
+            }
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-es") ||
+            !strcmp(argv[i], "--esp-size")) {
+            // Set size of EFI System Partition in Megabytes (MiB)
+            if (++i >= argc) {
+                options.error = true;
+                return options;
+            }
+
+            // Enforce minimum size of ESP per LBA size
+            options.esp_size = strtol(argv[i], NULL, 10);
+            if ((options.lba_size == 512  && options.esp_size < 33)  ||
+                (options.lba_size == 1024 && options.esp_size < 65)  ||
+                (options.lba_size == 2048 && options.esp_size < 129) ||
+                (options.lba_size == 4096 && options.esp_size < 257)) {
+
+                fprintf(stderr, "Error: ESP Must be a minimum of 33/65/129/257 MiB for "
+                                "LBA sizes 512/1024/2048/4096 respectively\n");
+                options.error = true;
+                return options;
+            }
+
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-ds") ||
+            !strcmp(argv[i], "--data-size")) {
+            // Set size of EFI System Partition in Megabytes (MiB)
+            if (++i >= argc) {
+                options.error = true;
+                return options;
+            }
+
+            options.data_size = strtol(argv[i], NULL, 10);
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-ae") ||
+            !strcmp(argv[i], "--add-esp-files")) {
+            // Add files to the EFI System Partition
+            if (i + 2 >= argc) {
+                // Need at least 2 more args for path & file, for this to work
+                fprintf(stderr, "Error: Must include at least 1 path and 1 file to add to ESP\n");
+                options.error = true;
+                return options;
+            }
+
+            // Allocate memory for file paths
+            options.esp_file_paths = malloc(10 * sizeof(char *));
+            const int MAX_FILES = 10;
+
+            for (i += 1; i < argc && argv[i][0] != '-'; i++) {
+                // Grab next 2 args, 1st will be path to add, 2nd will be file to add to path
+                const int MAX_LEN = 256;
+                options.esp_file_paths[options.num_esp_file_paths] = calloc(1, MAX_LEN);
+
+                // Get path to add
+                strncpy(options.esp_file_paths[options.num_esp_file_paths], 
+                        argv[i], 
+                        MAX_LEN-1);
+
+                // Ensure path starts and ends with a slash '/'
+                if ((argv[i][0] != '/') ||
+                    (argv[i][strlen(argv[i]) - 1] != '/')) {
+                    fprintf(stderr, 
+                            "Error: All file paths to add to ESP must start and end with slash '/'\n");
+                    options.error = true;
+                    return options;
+                }
+
+                // Concat file to add to path
+                i++;
+                char *slash = strrchr(argv[i], '/');
+                if (!slash) {
+                    // Plain file name, no folder path
+                    strncat(options.esp_file_paths[options.num_esp_file_paths], 
+                            argv[i], 
+                            MAX_LEN-1);
+                } else {
+                    // Get only last name in path, no folders 
+                    strncat(options.esp_file_paths[options.num_esp_file_paths], 
+                            slash + 1,  // File name starts after final slash
+                            MAX_LEN-1);
+                }
+
+                if (++options.num_esp_file_paths == MAX_FILES) {
+                    fprintf(stderr, 
+                            "Error: Number of ESP files to add must be <= %d\n",
+                            MAX_FILES);
+                    options.error = true;
+                    return options;
+                }
+            }
+
+            // Overall for loop will increment i; in order to get next option, decrement here
+            i--;    
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-ad") ||
+            !strcmp(argv[i], "--add-data-files")) {
+            // Add files to the Basic Data Partition
+            // Allocate memory for file paths
+            options.data_files = malloc(10 * sizeof(char *));
+            const int MAX_FILES = 10;
+
+            for (i += 1; i < argc && argv[i][0] != '-'; i++) {
+                // Grab next 2 args, 1st will be path to add, 2nd will be file to add to path
+                const int MAX_LEN = 256;
+                options.data_files[options.num_data_files] = calloc(1, MAX_LEN);
+
+                // Get path to add
+                strncpy(options.data_files[options.num_data_files], 
+                        argv[i], 
+                        MAX_LEN-1);
+
+                if (++options.num_data_files == MAX_FILES) {
+                    fprintf(stderr, 
+                            "Error: Number of Data Parition files to add must be <= %d\n",
+                            MAX_FILES);
+
+                    options.error = true;
+                    return options;
+                }
+            }
+
+            // Overall for loop will increment i; in order to get next option, decrement here
+            i--;    
+            continue;
+        }
+
+        if (!strcmp(argv[i], "-v") ||
+            !strcmp(argv[i], "--vhd")) {
+            // Add a fixed Virtual Hard Disk Footer to the disk image;
+            //   will also change the suffix to .vhd
+
+            options.vhd = true; 
+            continue;
+        }
+    }
+
+    return options;
+}
+
+// =============================
+// Add a fixed Virtual Hard Disk footer to the disk image
+// =============================
+void add_fixed_vhd_footer(FILE *image) {
+    // Fill out VHD footer info
+    Vhd vhd = {
+        .cookie = { "conectix" },
+        .features = { 0 },
+        .version = { 0x00, 0x01, 0x00, 0x00 },
+        .data_offset = -1,
+        .timestamp = { 0 }, // # of seconds since 01/01/2000
+        .creator_app = { "qfic" },
+        .creator_ver = { 0x00, 0x01, 0x00, 0x00},
+        .creator_OS = { "MYOS" },
+        .original_size = { 0 },
+        .current_size = { 0 },
+        .disk_geometry = { 0 },
+        .disk_type = { 0x00, 0x00, 0x00, 0x02 },
+        .checksum = { 0 },
+        .unique_id = new_guid(),
+        .saved_state = 0,
+        .reserved = { 0 },
+    };
+
+    // Unix epoch for 01/01/2000 = 946684800,
+    //  subtract this value from epoc 01/01/1970 to translate
+    //  to correct timestamp
+    uint32_t time_u32 = (uint32_t)time(NULL) - 946684800; 
+    vhd.timestamp[0] = (time_u32 >> 24) & 0xFF;
+    vhd.timestamp[1] = (time_u32 >> 16) & 0xFF;
+    vhd.timestamp[2] = (time_u32 >>  8) & 0xFF;
+    vhd.timestamp[3] = time_u32 & 0xFF;
+
+    vhd.original_size[0] = (image_size >> 56) & 0xFF;
+    vhd.original_size[1] = (image_size >> 48) & 0xFF;
+    vhd.original_size[2] = (image_size >> 40) & 0xFF;
+    vhd.original_size[3] = (image_size >> 32) & 0xFF;
+    vhd.original_size[4] = (image_size >> 24) & 0xFF;
+    vhd.original_size[5] = (image_size >> 16) & 0xFF;
+    vhd.original_size[6] = (image_size >>  8) & 0xFF;
+    vhd.original_size[7] = image_size & 0xFF;
+
+    memcpy(vhd.current_size, vhd.original_size, sizeof vhd.original_size); 
+
+    // Fill out disk geometry (CHS values)
+    // Code Taken from Microsoft VHD documentation
+    uint32_t totalSectors;
+    uint16_t cylinders;
+    uint8_t heads, sectorsPerTrack;
+    uint32_t cylinderTimesHeads;
+
+    totalSectors = image_size_lbas;
+    //                  C      H     S
+    if (totalSectors > 65535 * 16 * 255)
+        totalSectors = 65535 * 16 * 255;
+
+    if (totalSectors >= 65535 * 16 * 63) {
+        sectorsPerTrack = 255;
+        heads = 16;
+        cylinderTimesHeads = totalSectors / sectorsPerTrack;
+    } else {
+        sectorsPerTrack = 17;
+        cylinderTimesHeads = totalSectors / sectorsPerTrack;
+
+        heads = (cylinderTimesHeads + 1023) / 1024;
+
+        if (heads < 4) heads = 4;
+
+        if (cylinderTimesHeads >= (heads * 1024) || heads > 16) {
+            sectorsPerTrack = 31;
+            heads = 16;
+            cylinderTimesHeads = totalSectors / sectorsPerTrack;
+        }
+
+        if (cylinderTimesHeads >= (heads * 1024)) {
+            sectorsPerTrack = 63;
+            heads = 16;
+            cylinderTimesHeads = totalSectors / sectorsPerTrack;
+        }
+    }
+    cylinders = cylinderTimesHeads / heads;
+
+    // CHS values for disk geometry: Cylinders 2 bytes, heads 1 byte, sectorsPerTrack 1 byte
+    vhd.disk_geometry[0] = (cylinders >> 8) & 0xFF;
+    vhd.disk_geometry[1] = cylinders & 0xFF;
+    vhd.disk_geometry[2] = heads;
+    vhd.disk_geometry[3] = sectorsPerTrack;
+
+    // Fill out checksum
+    // Code Taken from Microsoft VHD documentation
+    uint32_t checksum = 0;
+    uint8_t *vhd_p = (uint8_t *)&vhd;
+    for (uint32_t counter = 0; counter < sizeof vhd; counter++) 
+        checksum += vhd_p[counter];
+
+    checksum = ~checksum;
+
+    vhd.checksum[0] = (checksum >> 24) & 0xFF;
+    vhd.checksum[1] = (checksum >> 16) & 0xFF;
+    vhd.checksum[2] = (checksum >>  8) & 0xFF;
+    vhd.checksum[3] = checksum & 0xFF;
+
+    // Write to end of file
+    fseek(image, 0, SEEK_END); 
+    fwrite(&vhd, 1, sizeof vhd, image);
+}
+
+// =============================
+// MAIN
+// =============================
+int main(int argc, char *argv[]) {
+    FILE *image = NULL, *fp = NULL;
+
+    // Get options passed in from command line
+    Options options = get_opts(argc, argv);
+    if (options.error) return EXIT_FAILURE;
+
+    // Set/evaluate values from options
+    if (options.help) {
+        // TODO: print help text
+        return EXIT_SUCCESS;
+    }
+
+    if (options.image_name) image_name = options.image_name;
+
+    if (options.lba_size) lba_size = options.lba_size;
+
+    if (options.esp_size) {
+        // Enforce minimum sizes for ESP according to LBA size
+        if ((lba_size == 512  && options.esp_size < 33)  ||
+            (lba_size == 1024 && options.esp_size < 65)  ||
+            (lba_size == 2048 && options.esp_size < 129) ||
+            (lba_size == 4096 && options.esp_size < 257)) {
+
+            fprintf(stderr, "Error: ESP Must be a minimum of 33/65/129/257 MiB for "
+                            "LBA sizes 512/1024/2048/4096 respectively\n");
+            return EXIT_FAILURE;
+        }
+
+        esp_size = options.esp_size * ALIGNMENT; 
+    }
+
+    // NOTE: Data partition will always be at least 1 MiB in size
+    if (options.data_size) data_size = options.data_size * ALIGNMENT;
 
     // Set sizes & LBA values
     gpt_table_lbas = GPT_TABLE_SIZE / lba_size;
+
+    // Add extra padding for:
+    //   2 aligned partitions
+    //   2 GPT tables
+    //   MBR
+    //   GPT headers
     const uint64_t padding = (ALIGNMENT*2 + (lba_size * ((gpt_table_lbas*2) + 1 + 2))); 
     image_size = esp_size + data_size + padding; 
     image_size_lbas = bytes_to_lbas(image_size);
@@ -850,24 +1326,68 @@ int main(void) {
     data_size_lbas = bytes_to_lbas(data_size);
     data_lba = next_aligned_lba(esp_lba + esp_size_lbas);
 
+    if (options.vhd) {
+        // Only allow lba_size = 512 for vhd,
+        //   the spec says it only uses 512 byte disk sectors
+        if (lba_size > 512) {
+            fprintf(stderr, "Error: VHD only allows disk sector size (LBA) = 512 bytes\n");
+            return EXIT_FAILURE;
+        }
+
+        // Add VHD suffix to image name
+        char *buf = calloc(1, strlen(image_name) + 4);
+        strcpy(buf, image_name);
+
+        char *dot_pos = strrchr(buf, '.');
+        if (!dot_pos) strcat(buf, ".vhd");
+        else          strcpy(dot_pos, ".vhd");
+
+        image_name = buf;
+    }
+
+    // Open non-VHD image
+    image = fopen(image_name, "wb+");
+    if (!image) {
+        fprintf(stderr, "Error: could not open file %s\n", image_name);
+        return EXIT_FAILURE;
+    }
+
+    // Print info on sizes and image for user
+    printf("IMAGE NAME: %s\n"
+           "LBA SIZE: %"PRIu64"\n"
+           "ESP SIZE: %"PRIu64"MiB\n"
+           "DATA SIZE: %"PRIu64"MiB\n"
+           "PADDING: %"PRIu64"MiB\n"
+           "IMAGE SIZE: %"PRIu64"MiB\n",
+
+           image_name,
+           lba_size,
+           esp_size / ALIGNMENT,
+           data_size / ALIGNMENT,
+           padding / ALIGNMENT,
+           image_size / ALIGNMENT);
+
     // Seed random number generation
     srand(time(NULL));
 
     // Write protective MBR
     if (!write_mbr(image)) {
         fprintf(stderr, "Error: could not write protective MBR for file %s\n", image_name);
+        fclose(image);
         return EXIT_FAILURE;
     }
 
     // Write GPT headers & tables
     if (!write_gpts(image)) {
         fprintf(stderr, "Error: could not write GPT headers & tables for file %s\n", image_name);
+        fclose(image);
         return EXIT_FAILURE;
     }
 
     // Write EFI System Partition w/FAT32 filesystem
     if (!write_esp(image)) {
         fprintf(stderr, "Error: could not write ESP for file %s\n", image_name);
+        fclose(image);
         return EXIT_FAILURE;
     }
 
@@ -876,11 +1396,10 @@ int main(void) {
     fp = fopen("BOOTX64.EFI", "rb"); 
     if (fp) {
         fclose(fp);
-        char *path = calloc(1, 25);
+        char path[25] = { 0 };
         strcpy(path, "/EFI/BOOT/BOOTX64.EFI");
         if (!add_path_to_esp(path, image)) 
             fprintf(stderr, "Error: Could not add file '%s'\n", path);
-        free(path);
     }
 
     // Add disk image info file to hold at minimum the size of this disk image;
@@ -888,18 +1407,43 @@ int main(void) {
     if (!add_disk_image_info_file(image)) 
         fprintf(stderr, "Error: Could not add disk image info file to '%s'\n", image_name);
 
+    if (options.num_esp_file_paths > 0) {
+        // Add file paths to EFI System Partition
+        for (uint32_t i = 0; i < options.num_esp_file_paths; i++) {
+            if (!add_path_to_esp(options.esp_file_paths[i], image)) {
+                fprintf(stderr,
+                        "ERROR: Could not add '%s' to ESP\n",
+                        options.esp_file_paths[i]);
+            }
+            free(options.esp_file_paths[i]);
+        }
+        free(options.esp_file_paths);
+    }
+
+    if (options.num_data_files > 0) {
+        // Add file paths to Basic Data Partition
+        for (uint32_t i = 0; i < options.num_data_files; i++) {
+            if (!add_file_to_data_partition(options.data_files[i], image)) {
+                fprintf(stderr,
+                        "ERROR: Could not add file '%s' to data partition\n",
+                        options.data_files[i]);
+            }
+            free(options.data_files[i]);
+        }
+        free(options.data_files);
+    }
+
+    if (options.vhd) {
+        // Add a fixed Virtual Hard Disk footer to the disk image
+        add_fixed_vhd_footer(image);
+        printf("Added VHD footer\n");
+
+        free(image_name);
+    } 
+
+    // File/misc. cleanup
+    fclose(image);
+
     return EXIT_SUCCESS;
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
