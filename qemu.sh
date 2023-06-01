@@ -2,7 +2,7 @@
 
 # Sendin' Out a TEST O S
 qemu-system-x86_64 \
--drive format=raw,file=test.img \
+-drive format=raw,file=test.hdd \
 -bios bios64.bin \
 -m 256M \
 -vga std \
