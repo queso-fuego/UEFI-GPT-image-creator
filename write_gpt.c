@@ -223,7 +223,7 @@ uint64_t align_lba = 0, esp_lba = 0, data_lba = 0,
 // Convert bytes to LBAs
 // =====================================
 uint64_t bytes_to_lbas(const uint64_t bytes) {
-    return (bytes / lba_size) + (bytes % lba_size > 0 ? 1 : 0);
+    return (bytes + (lba_size - 1)) / lba_size;
 }
 
 // =====================================
@@ -249,7 +249,7 @@ Guid new_guid(void) {
     uint8_t rand_arr[16] = { 0 };
 
     for (uint8_t i = 0; i < sizeof rand_arr; i++)
-        rand_arr[i] = rand() % (UINT8_MAX + 1);
+        rand_arr[i] = rand() & 0xFF;    // Equivalent to modulo 256
 
     // Fill out GUID
     Guid result = {
