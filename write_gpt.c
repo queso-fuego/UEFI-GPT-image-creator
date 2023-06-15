@@ -1290,27 +1290,28 @@ int main(int argc, char *argv[]) {
                 "\n"
                 "options:\n"
                 "-ad --add-data-files   Add local files to the basic data partition, and create\n"
-                "                       a <FILE.INF> file for each one under the directory\n"
-                "                       '/EFI/BOOT/' in the ESP. ex: '-ad ../folderA/fileB.txt'.\n"
+                "                       a <DATAFLS.INF> file in directory '/EFI/BOOT/' in the \n"
+                "                       ESP. This INF file will hold info for each file added\n"
+                "                       ex: '-ad info.txt ../folderA/kernel.bin'.\n"
                 "-ae --add-esp-files    Add local files to the generated EFI System Partition.\n"
                 "                       File paths must start under root '/' and end with a \n"
                 "                       slash '/', and all dir/file names are limited to FAT 8.3\n"
                 "                       naming. Each file is added in 2 parts; The 1st arg for\n"
                 "                       the path, and the 2nd arg for the file to add to that\n"
                 "                       path. ex: '-ae /EFI/BOOT/ file1.txt' will add the local\n"
-                "                       file 'file1.txt' to the ESP under the path '/EFI/BOOT'.\n"
+                "                       file 'file1.txt' to the ESP under the path '/EFI/BOOT/'.\n"
                 "                       To add multiple files (up to 10), use multiple\n"
-                "                       <path> <file> args after the initial -ae flag.\n"
+                "                       <path> <file> args.\n"
                 "                       ex: '-ae /DIR1/ FILE1.TXT /DIR2/ FILE2.TXT'.\n"
                 "-ds --data-size        Set the size of the Basic Data Partition in MiB; Minimum\n" 
                 "                       size is 1 MiB\n" 
                 "-es --esp-size         Set the size of the EFI System Partition in MiB\n"
                 "-h  --help             Print this help text\n"
                 "-i  --image-name       Set the image name. Default name is 'test.img'\n"
-                "-l  --lba-size         Set the lba (sector) size in bytes; This is considered\n"
+                "-l  --lba-size         Set the lba (sector) size in bytes; This is \n"
                 "                       experimental, as tools are lacking for proper testing.\n"
                 "                       Valid sizes: 512/1024/2048/4096\n" 
-                "-v  --vhd              Create a fixed vhd footer, and add it to the end of the\n" 
+                "-v  --vhd              Create a fixed vhd footer and add it to the end of the\n" 
                 "                       disk image. The image name will have a .vhd suffix.\n",
                 argv[0]);
         return EXIT_SUCCESS;
@@ -1484,14 +1485,27 @@ int main(int argc, char *argv[]) {
         fclose(fp); 
     }
 
+    // Pad file to next 4KiB aligned size
+    fseek(image, 0, SEEK_END);
+    uint64_t current_size = ftell(image);
+    uint64_t new_size = current_size - (current_size % 4096) + 4096;
+    uint8_t byte = 0;
+
     if (options.vhd) {
+        fseek(image, new_size - (sizeof(Vhd) + 1), SEEK_SET);
+        fwrite(&byte, 1, 1, image);
+
         // Add a fixed Virtual Hard Disk footer to the disk image
         add_fixed_vhd_footer(image);
         printf("Added VHD footer\n");
 
         // Image_name had .vhd concat-ed on in a separate buffer
         free(image_name);   
-    } 
+    } else {
+        // No vhd footer
+        fseek(image, new_size - 1, SEEK_SET);
+        fwrite(&byte, 1, 1, image);
+    }
 
     // File cleanup
     fclose(image);
