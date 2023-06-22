@@ -1441,11 +1441,6 @@ int main(int argc, char *argv[]) {
         fclose(fp);
     }
 
-    // Add disk image info file to hold at minimum the size of this disk image;
-    //   this could be used in an EFI application later as part of an installer, for example
-    if (!add_disk_image_info_file(image)) 
-        fprintf(stderr, "Error: Could not add disk image info file to '%s'\n", image_name);
-
     if (options.num_esp_file_paths > 0) {
         // Add file paths to EFI System Partition
         for (uint32_t i = 0; i < options.num_esp_file_paths; i++) {
@@ -1511,6 +1506,12 @@ int main(int argc, char *argv[]) {
         fseek(image, new_size - 1, SEEK_SET);
         fwrite(&byte, 1, 1, image);
     }
+
+    // Add disk image info file to hold at minimum the size of this disk image;
+    //   this could be used in an EFI application later as part of an installer, for example
+    image_size = new_size; // Image size is used to write info file
+    if (!add_disk_image_info_file(image)) 
+        fprintf(stderr, "Error: Could not add disk image info file to '%s'\n", image_name);
 
     // File cleanup
     fclose(image);
