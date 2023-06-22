@@ -1198,14 +1198,19 @@ void add_fixed_vhd_footer(FILE *image) {
     vhd.timestamp[2] = (time_u32 >>  8) & 0xFF;
     vhd.timestamp[3] = time_u32 & 0xFF;
 
-    vhd.original_size[0] = (image_size >> 56) & 0xFF;
-    vhd.original_size[1] = (image_size >> 48) & 0xFF;
-    vhd.original_size[2] = (image_size >> 40) & 0xFF;
-    vhd.original_size[3] = (image_size >> 32) & 0xFF;
-    vhd.original_size[4] = (image_size >> 24) & 0xFF;
-    vhd.original_size[5] = (image_size >> 16) & 0xFF;
-    vhd.original_size[6] = (image_size >>  8) & 0xFF;
-    vhd.original_size[7] = image_size & 0xFF;
+    // Get current image size (should be 4KiB aligned - 512 bytes)
+    //   and use 4KiB aligned size for vhd footer to not have "corrupted" image
+    fseek(image, 0, SEEK_END); 
+    const uint64_t vhd_image_size = ftell(image) + 512;
+
+    vhd.original_size[0] = (vhd_image_size >> 56) & 0xFF;
+    vhd.original_size[1] = (vhd_image_size >> 48) & 0xFF;
+    vhd.original_size[2] = (vhd_image_size >> 40) & 0xFF;
+    vhd.original_size[3] = (vhd_image_size >> 32) & 0xFF;
+    vhd.original_size[4] = (vhd_image_size >> 24) & 0xFF;
+    vhd.original_size[5] = (vhd_image_size >> 16) & 0xFF;
+    vhd.original_size[6] = (vhd_image_size >>  8) & 0xFF;
+    vhd.original_size[7] = vhd_image_size & 0xFF;
 
     memcpy(vhd.current_size, vhd.original_size, sizeof vhd.original_size); 
 
@@ -1267,7 +1272,7 @@ void add_fixed_vhd_footer(FILE *image) {
     vhd.checksum[2] = (checksum >>  8) & 0xFF;
     vhd.checksum[3] = checksum & 0xFF;
 
-    // Write to end of file
+    // Write footer to end of file
     fseek(image, 0, SEEK_END); 
     fwrite(&vhd, 1, sizeof vhd, image);
 }
