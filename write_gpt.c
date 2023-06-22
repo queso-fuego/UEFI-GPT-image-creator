@@ -1201,7 +1201,7 @@ void add_fixed_vhd_footer(FILE *image) {
     // Get current image size (should be 4KiB aligned - 512 bytes)
     //   and use 4KiB aligned size for vhd footer to not have "corrupted" image
     fseek(image, 0, SEEK_END); 
-    const uint64_t vhd_image_size = ftell(image) + 512;
+    const uint64_t vhd_image_size = ftell(image);
 
     vhd.original_size[0] = (vhd_image_size >> 56) & 0xFF;
     vhd.original_size[1] = (vhd_image_size >> 48) & 0xFF;
