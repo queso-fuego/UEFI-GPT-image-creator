@@ -8,6 +8,8 @@ qemu-system-x86_64 \
 -vga std \
 -name TESTOS \
 -machine q35 \
+-usb \
+-device usb-mouse \
 -net none
 
 # For testing other drive physical/logical sizes. Although this did not work for me for lba size > 512
