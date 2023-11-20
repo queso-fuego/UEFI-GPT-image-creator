@@ -9,4 +9,5 @@ qemu-system-x86_64 ^
 -machine q35 ^
 -usb ^
 -device usb-mouse ^
+-rtc base=localtime ^
 -net none

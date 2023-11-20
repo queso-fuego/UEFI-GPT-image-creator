@@ -10,6 +10,7 @@ qemu-system-x86_64 \
 -machine q35 \
 -usb \
 -device usb-mouse \
+-rtc base=localtime \
 -net none
 
 # For testing other drive physical/logical sizes. Although this did not work for me for lba size > 512
