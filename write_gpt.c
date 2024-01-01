@@ -1060,7 +1060,7 @@ Options get_opts(int argc, char *argv[]) {
             }
 
             // Allocate memory for file paths & File pointers
-            const int MAX_FILES = 10;
+            const uint32_t MAX_FILES = 10;
             options.esp_file_paths = malloc(MAX_FILES * sizeof(char *));
             options.esp_files = malloc(MAX_FILES * sizeof(FILE *));
 
@@ -1124,7 +1124,7 @@ Options get_opts(int argc, char *argv[]) {
             !strcmp(argv[i], "--add-data-files")) {
             // Add files to the Basic Data Partition
             // Allocate memory for file paths
-            const int MAX_FILES = 10;
+            const uint32_t MAX_FILES = 10;
             options.data_files = malloc(MAX_FILES * sizeof(char *));
 
             for (i += 1; i < argc && argv[i][0] != '-'; i++) {
