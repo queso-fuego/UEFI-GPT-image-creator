@@ -639,11 +639,17 @@ bool add_file_to_esp(char *file_name, FILE *file, FILE *image, File_Type type, u
     // First grab FAT32 filesystem info for VBR and File System info
     Vbr vbr = { 0 };
     fseek(image, esp_lba * lba_size, SEEK_SET);
-    fread(&vbr, sizeof vbr, 1, image);
+    if (fread(&vbr, 1, sizeof vbr, image) != sizeof vbr) {
+        fprintf(stderr, "Error: Could not fead vbr.\n");
+        return false;
+    }
 
     FSInfo fsinfo = { 0 };
     fseek(image, (esp_lba + 1) * lba_size, SEEK_SET);
-    fread(&fsinfo, sizeof fsinfo, 1, image);
+    if (fread(&fsinfo, 1, sizeof fsinfo, image) != sizeof fsinfo) {
+        fprintf(stderr, "Error: Could not fead fsinfo.\n");
+        return false;
+    }
 
     // Get file size of file
     uint64_t file_size_bytes = 0, file_size_lbas = 0;
@@ -691,9 +697,9 @@ bool add_file_to_esp(char *file_name, FILE *file, FILE *image, File_Type type, u
     // Add new directory entry for this new dir/file at end of current dir_entrys 
     FAT32_Dir_Entry_Short dir_entry = { 0 };
 
-    fread(&dir_entry, 1, sizeof dir_entry, image);
-    while (dir_entry.DIR_Name[0] != '\0')
-        fread(&dir_entry, 1, sizeof dir_entry, image);
+    while (fread(&dir_entry, 1, sizeof dir_entry, image) == sizeof dir_entry &&
+           dir_entry.DIR_Name[0] != '\0')
+        ;
 
     // sizeof dir_entry = 32, back up to overwrite this empty spot
     fseek(image, -32, SEEK_CUR);    
@@ -811,8 +817,8 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
         bool found = false;
         fseek(image, (fat32_data_lba + dir_cluster - 2) * lba_size, SEEK_SET);
         do {
-            fread(&dir_entry, 1, sizeof dir_entry, image);
-            if (!memcmp(dir_entry.DIR_Name, start, strlen(start))) {
+            if (fread(&dir_entry, 1, sizeof dir_entry, image) == sizeof dir_entry &&
+                !memcmp(dir_entry.DIR_Name, start, strlen(start))) {
                 // Found name in directory, save cluster for last directory found
                 dir_cluster = (dir_entry.DIR_FstClusHI << 16) | dir_entry.DIR_FstClusLO;
                 found = true;
