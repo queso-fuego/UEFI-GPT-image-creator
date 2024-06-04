@@ -704,43 +704,11 @@ bool add_file_to_esp(char *file_name, FILE *file, FILE *image, File_Type type, u
     // sizeof dir_entry = 32, back up to overwrite this empty spot
     fseek(image, -32, SEEK_CUR);    
 
-    // Check name length for FAT 8.3 naming
-    const char *dot_pos = strchr(file_name, '.');
-    const uint32_t name_len = strlen(file_name);
-    if ((!dot_pos && name_len > 11) || 
-        (dot_pos && name_len > 12)  || 
-        (dot_pos && dot_pos - file_name > 8)) {
-        return false;   // Name is too long or invalid
-    }
-    
-    // Convert name to FAT 8.3 naming
-    // e.g. "FOO.BAR"  -> "FOO     BAR",
-    //      "BA.Z"     -> "BA      Z  ",
-    //      "ELEPHANT" -> "ELEPHANT   "
-    memset(dir_entry.DIR_Name, ' ', 11);    // Start with all spaces, name/ext will be space padded
+    // Set 8.3 file name
+    memset(dir_entry.DIR_Name, ' ', 11);    // 8.3 name is padded with spaces
+    memcpy(dir_entry.DIR_Name, file_name, strlen(file_name));
 
-    if (dot_pos) {
-        uint8_t i = 0;
-        // Name 8 portion of 8.3
-        for (i = 0; i < (dot_pos - file_name); i++)
-            dir_entry.DIR_Name[i] = file_name[i];
-
-        uint8_t j = i;
-        while (i < 8) dir_entry.DIR_Name[i++] = ' ';
-
-        if (file_name[j] == '.') j++;   // Skip dot to get to extension
-
-        // Extension 3 portion of 8.3
-        while (file_name[j])
-            dir_entry.DIR_Name[i++] = file_name[j++];
-
-        while (i < 11) dir_entry.DIR_Name[i++] = ' ';
-    } else {
-        memcpy(dir_entry.DIR_Name, file_name, name_len);
-    }
-
-    if (type == TYPE_DIR) 
-        dir_entry.DIR_Attr = ATTR_DIRECTORY;
+    if (type == TYPE_DIR) dir_entry.DIR_Attr = ATTR_DIRECTORY;
 
     uint16_t fat_time, fat_date;
     get_fat_dir_entry_time_date(&fat_time, &fat_date);
@@ -802,6 +770,7 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
     char *start = path + 1; // Skip initial slash
     char *end = start;
     uint32_t dir_cluster = 2;   // Next directory's cluster location; start at root
+    bool any_files_added = false;
 
     // Get next name from path, until reached end of path for file to add
     while (type == TYPE_DIR) {
@@ -812,13 +781,33 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
 
         *end = '\0';    // Null terminate next name in case of directory
 
+        char *dot_pos = strchr(start, '.');
+        if ((type == TYPE_DIR  && strlen(start) > 11) ||
+            (type == TYPE_FILE && strlen(start) > 12) || 
+            (dot_pos && dot_pos - start > 8)) {
+            return false;   // Name is too long or invalid 8.3 naming
+        }
+
+        // Convert file name to 8.3 name before checking if exists
+        // e.g. "FOO.BAR"  -> "FOO     BAR" 
+        //      "BA.Z"     -> "BA      Z  " 
+        //      "ELEPHANT" -> "ELEPHANT   "
+        char short_name[12] = {0};
+        memset(short_name, ' ', 11);
+        if (type == TYPE_DIR || !dot_pos) 
+            strcpy(short_name, start);  // No '.', copy full name
+        else {
+            memcpy(short_name, start, dot_pos - start); // Name 8 in 8.3
+            memcpy(&short_name[8], dot_pos+1, 3);       // Extension 3 in 8.3
+        }
+
         // Search for name in current directory's file data (dir_entrys)
         FAT32_Dir_Entry_Short dir_entry = { 0 };
         bool found = false;
         fseek(image, (fat32_data_lba + dir_cluster - 2) * lba_size, SEEK_SET);
         do {
             if (fread(&dir_entry, 1, sizeof dir_entry, image) == sizeof dir_entry &&
-                !memcmp(dir_entry.DIR_Name, start, strlen(start))) {
+                !memcmp(dir_entry.DIR_Name, short_name, strlen(short_name))) {
                 // Found name in directory, save cluster for last directory found
                 dir_cluster = (dir_entry.DIR_FstClusHI << 16) | dir_entry.DIR_FstClusLO;
                 found = true;
@@ -830,8 +819,10 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
             // Add new directory or file to last found directory;
             //   if new directory, update current directory cluster to check/use
             //   for next new files 
-            if (!add_file_to_esp(start, file, image, type, &dir_cluster))
+            if (!add_file_to_esp(short_name, file, image, type, &dir_cluster))
                 return false;
+
+            any_files_added = true;
         }
 
         *end++ = '/';
@@ -841,7 +832,7 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
     *--end = '\0';  // Don't add extra slash to end of path, final file name is not a directory
 
     // Show info to user
-    printf("Added '%s' to EFI System Partition\n", path);
+    if (any_files_added) printf("Added '%s' to EFI System Partition\n", path);
 
     return true;
 }
