@@ -6,6 +6,7 @@
 #include <uchar.h> 
 #include <string.h>
 #include <inttypes.h>
+#include <ctype.h>
 
 // -------------------------------------
 // Global Typedefs
@@ -705,8 +706,7 @@ bool add_file_to_esp(char *file_name, FILE *file, FILE *image, File_Type type, u
     fseek(image, -32, SEEK_CUR);    
 
     // Set 8.3 file name
-    memset(dir_entry.DIR_Name, ' ', 11);    // 8.3 name is padded with spaces
-    memcpy(dir_entry.DIR_Name, file_name, strlen(file_name));
+    memcpy(dir_entry.DIR_Name, file_name, 11);
 
     if (type == TYPE_DIR) dir_entry.DIR_Attr = ATTR_DIRECTORY;
 
@@ -766,6 +766,11 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
     // Parse input path for each name
     if (*path != '/') return false; // Path must begin with root '/'
 
+    // Uppercase path for that smooth DOS feel, but probably doesn't matter for any modern UEFI
+    //   or FAT implementations
+    for (size_t i = 0; i < strlen(path); i++) 
+        path[i] = toupper(path[i]);
+
     File_Type type = TYPE_DIR;
     char *start = path + 1; // Skip initial slash
     char *end = start;
@@ -794,11 +799,11 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
         //      "ELEPHANT" -> "ELEPHANT   "
         char short_name[12] = {0};
         memset(short_name, ' ', 11);
-        if (type == TYPE_DIR || !dot_pos) 
-            strcpy(short_name, start);  // No '.', copy full name
-        else {
+        if (type == TYPE_DIR || !dot_pos)  {
+            memcpy(short_name, start, strlen(start));  // No '.', copy full name
+        } else {
             memcpy(short_name, start, dot_pos - start); // Name 8 in 8.3
-            memcpy(&short_name[8], dot_pos+1, 3);       // Extension 3 in 8.3
+            strncpy(&short_name[8], dot_pos+1, 3);      // Extension 3 in 8.3
         }
 
         // Search for name in current directory's file data (dir_entrys)
@@ -807,7 +812,7 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
         fseek(image, (fat32_data_lba + dir_cluster - 2) * lba_size, SEEK_SET);
         do {
             if (fread(&dir_entry, 1, sizeof dir_entry, image) == sizeof dir_entry &&
-                !memcmp(dir_entry.DIR_Name, short_name, strlen(short_name))) {
+                !memcmp(dir_entry.DIR_Name, short_name, 11)) {
                 // Found name in directory, save cluster for last directory found
                 dir_cluster = (dir_entry.DIR_FstClusHI << 16) | dir_entry.DIR_FstClusLO;
                 found = true;
