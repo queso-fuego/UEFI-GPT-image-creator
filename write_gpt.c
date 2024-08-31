@@ -1314,7 +1314,7 @@ int main(int argc, char *argv[]) {
                 "                       size is 1 MiB\n" 
                 "-es --esp-size         Set the size of the EFI System Partition in MiB\n"
                 "-h  --help             Print this help text\n"
-                "-i  --image-name       Set the image name. Default name is 'test.img'\n"
+                "-i  --image-name       Set the image name. Default name is 'test.hdd'\n"
                 "-l  --lba-size         Set the lba (sector) size in bytes; This is \n"
                 "                       experimental, as tools are lacking for proper testing.\n"
                 "                       Valid sizes: 512/1024/2048/4096\n" 

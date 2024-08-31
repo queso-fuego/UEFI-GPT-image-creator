@@ -70,7 +70,7 @@ options:
                        size is 1 MiB 
 -es --esp-size         Set the size of the EFI System Partition in MiB
 -h  --help             Print this help text
--i  --image-name       Set the image name. Default name is 'test.img'
+-i  --image-name       Set the image name. Default name is 'test.hdd'
 -l  --lba-size         Set the lba (sector) size in bytes; This is 
                        experimental, as tools are lacking for proper testing.
                        Valid sizes: 512/1024/2048/4096 
