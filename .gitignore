@@ -6,3 +6,4 @@ write_gpt*
 *.INF
 *.vhd
 *.txt
+kernel*
