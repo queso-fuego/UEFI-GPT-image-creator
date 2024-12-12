@@ -786,11 +786,33 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
 
         *end = '\0';    // Null terminate next name in case of directory
 
+
         char *dot_pos = strchr(start, '.');
         if ((type == TYPE_DIR  && strlen(start) > 11) ||
             (type == TYPE_FILE && strlen(start) > 12) || 
-            (dot_pos && dot_pos - start > 8)) {
-            return false;   // Name is too long or invalid 8.3 naming
+            (dot_pos && ((dot_pos - start > 8) ||           // Name 8 too long
+                         (end - dot_pos) > 4))) {           // Ext 3 too long
+            // Name is too long or invalid 8.3 naming
+            fprintf(stderr, "WARNING: Name '%s' is too long for 8.3 naming. Truncating to fit.\n",
+                    start);
+
+            if (dot_pos) dot_pos[4] = '\0';  // Truncate file name
+            else {
+                // Directory
+                size_t diff = strlen(start) - 11;   // Get name overlength amount
+
+                *end = '/';                 // End new name
+                char *next_start = end+1;   // Start of next name in path
+
+                // Truncate directory name by shifting rest of path back
+                memmove(start+12, next_start, strlen(next_start));
+
+                // Set new end of full path by shortened amount
+                *(path + strlen(path) - diff) = '\0';   
+
+                end = start+11;
+                *end = '\0';    // End new name
+            }
         }
 
         // Convert file name to 8.3 name before checking if exists
