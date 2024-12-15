@@ -16,9 +16,9 @@ The size of both partitions can be changed with command line parameters, see **U
 If the file `BOOTX64.EFI` is found in the current directory when `write_gpt` is ran, it will be added to the `/EFI/BOOT/` directory in the ESP.
 This file is assumed to be an x86_64 EFI Application, and will be booted automatically in QEMU/OVMF or on UEFI compliant hardware.
 
-A `DSKIMG.INF` file will be created containing the size of the generated image, and added to the `/EFI/BOOT/` directory.
+A `FILE.TXT` file will be created containing the size of the generated image, and added to the `/EFI/BOOT/` directory.
 
-If adding files to the data partition with `-ad <files> --add-data-files <files>`, a `DATAFLS.INF` file will be created in `/EFI/BOOT/` in the ESP. It will have info on each file added, including each file's name, size in bytes, and starting lba (disk sector) in the disk image.
+If adding files to the data partition with `-ad <files> --add-data-files <files>`, a `FILE.TXT` file will be created in `/EFI/BOOT/` in the ESP. It will have info on each file added, including each file's name, size in bytes, and starting lba (disk sector) in the disk image.
 The purpose of this is to e.g. find a kernel or other files more easily within an EFI application, but not impose or create any set filesystem.
 
 A valid OVMF file for qemu is included as `bios64.bin`. Use it with qemu as `-bios bios64.bin`.
@@ -53,7 +53,7 @@ write_gpt [options]
 
 options:
 -ad --add-data-files   Add local files to the basic data partition, and create
-                       a <DATAFLS.INF> file in directory '/EFI/BOOT/' in the 
+                       a <FILE.TXT> file in directory '/EFI/BOOT/' in the 
                        ESP. This INF file will hold info for each file added
                        ex: '-ad info.txt ../folderA/kernel.bin'.
 -ae --add-esp-files    Add local files to the generated EFI System Partition.
