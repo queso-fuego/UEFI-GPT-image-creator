@@ -220,6 +220,8 @@ uint64_t esp_size_lbas = 0, data_size_lbas = 0, image_size_lbas = 0,
 uint64_t align_lba = 0, esp_lba = 0, data_lba = 0,
          fat32_fats_lba = 0, fat32_data_lba = 0;          // Starting LBA values
 
+bool opened_info_file = false;
+
 // =====================================
 // Convert bytes to LBAs
 // =====================================
@@ -864,22 +866,22 @@ bool add_path_to_esp(char *path, FILE *file, FILE *image) {
     return true;
 }
 
-// =============================
+// =========================================================================
 // Add disk image info file to hold at minimum the size of this disk image
-// =============================
+// =========================================================================
 bool add_disk_image_info_file(FILE *image) {
-    char *file_buf = calloc(1, lba_size);
-    snprintf(file_buf, 
-             lba_size,
-             "DISK_SIZE=%"PRIu64"\n", 
-             image_size);
-
-    FILE *fp = fopen("FILE.TXT", "wb");
+    FILE *fp = NULL;
+    if (!opened_info_file) {
+        opened_info_file = true;
+        fp = fopen("FILE.TXT", "wb");  // Truncate on first open
+    } else {
+        fp = fopen("FILE.TXT", "ab");  // Add to end of file
+    }
     if (!fp) return false;
 
-    fwrite(file_buf, strlen(file_buf), 1, fp);
-    free(file_buf);
+    fprintf(fp, "DISK_SIZE=%"PRIu64"\n", image_size);
     fclose(fp);
+
     fp = fopen("FILE.TXT", "rb");
 
     char path[25] = { 0 };
@@ -890,9 +892,9 @@ bool add_disk_image_info_file(FILE *image) {
     return true;
 }
 
-// =============================
+// ======================================
 // Add file to the Basic Data Partition
-// =============================
+// ======================================
 bool add_file_to_data_partition(char *filepath, FILE *image) {
     // Will save location of next spot to put a file in
     static uint64_t starting_lba = 0;
@@ -942,12 +944,11 @@ bool add_file_to_data_partition(char *filepath, FILE *image) {
            filepath);
 
     // Add to info file for each file added 
-    static bool first_file = true;
     char info_file[12] = "FILE.TXT"; // "Data (partition) files info"
 
-    if (first_file) {
-        first_file = false;
-        fp = fopen(info_file, "wb");    // Truncate before writing 
+    if (!opened_info_file) {
+        opened_info_file = true;
+        fp = fopen(info_file, "wb");    // Truncate before writing again
     } else {
         fp = fopen(info_file, "ab");    // Add to end of previous info
     }
@@ -957,18 +958,14 @@ bool add_file_to_data_partition(char *filepath, FILE *image) {
         return false;
     }
 
-    file_buf = calloc(1, lba_size);
-    snprintf((char *)file_buf,
-             lba_size,
-             "FILE_NAME=%s\n"
-             "FILE_SIZE=%"PRIu64"\n"
-             "DISK_LBA=%"PRIu64"\n\n",  // Add extra line between files
-             name,
-             file_size_bytes,
-             data_lba + starting_lba);  // Offset from start of data partition
+    fprintf(fp,
+            "FILE_NAME=%s\n"
+            "FILE_SIZE=%"PRIu64"\n"
+            "DISK_LBA=%"PRIu64"\n\n",  // Add extra line between files
+            name,
+            file_size_bytes,
+            data_lba + starting_lba);  // Offset from start of data partition
 
-    fwrite(file_buf, 1, strlen((char *)file_buf), fp);
-    free(file_buf);
     fclose(fp);
 
     // Set next spot to write a file at
