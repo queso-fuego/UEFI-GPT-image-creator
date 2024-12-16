@@ -672,7 +672,7 @@ bool add_file_to_esp(char *file_name, FILE *file, FILE *image, File_Type type, u
 
         uint32_t cluster = fsinfo.FSI_Nxt_Free;
         next_free_cluster = cluster;
-        if (type == TYPE_FILE) {
+        if (type == TYPE_FILE && file_size_bytes != 0) {
             for (uint64_t lba = 0; lba < file_size_lbas - 1; lba++) {
                 cluster++;  // Each cluster points to next cluster of file data
                 next_free_cluster++;
