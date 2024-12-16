@@ -874,16 +874,16 @@ bool add_disk_image_info_file(FILE *image) {
              "DISK_SIZE=%"PRIu64"\n", 
              image_size);
 
-    FILE *fp = fopen("DSKIMG.INF", "wb");
+    FILE *fp = fopen("FILE.TXT", "wb");
     if (!fp) return false;
 
     fwrite(file_buf, strlen(file_buf), 1, fp);
     free(file_buf);
     fclose(fp);
-    fp = fopen("DSKIMG.INF", "rb");
+    fp = fopen("FILE.TXT", "rb");
 
     char path[25] = { 0 };
-    strcpy(path, "/EFI/BOOT/DSKIMG.INF");
+    strcpy(path, "/EFI/BOOT/FILE.TXT");
     if (!add_path_to_esp(path, fp, image)) return false;
     fclose(fp);
 
@@ -943,7 +943,7 @@ bool add_file_to_data_partition(char *filepath, FILE *image) {
 
     // Add to info file for each file added 
     static bool first_file = true;
-    char info_file[12] = "DATAFLS.INF"; // "Data (partition) files info"
+    char info_file[12] = "FILE.TXT"; // "Data (partition) files info"
 
     if (first_file) {
         first_file = false;
@@ -1319,7 +1319,7 @@ int main(int argc, char *argv[]) {
                 "\n"
                 "options:\n"
                 "-ad --add-data-files   Add local files to the basic data partition, and create\n"
-                "                       a <DATAFLS.INF> file in directory '/EFI/BOOT/' in the \n"
+                "                       a <FILE.TXT> file in directory '/EFI/BOOT/' in the \n"
                 "                       ESP. This INF file will hold info for each file added\n"
                 "                       ex: '-ad info.txt ../folderA/kernel.bin'.\n"
                 "-ae --add-esp-files    Add local files to the generated EFI System Partition.\n"
@@ -1492,9 +1492,9 @@ int main(int argc, char *argv[]) {
         }
         free(options.data_files);
 
-        char info_file[12] = "DATAFLS.INF"; // "Data (partition) files info"
+        char info_file[12] = "FILE.TXT"; // "Data (partition) files info"
         char info_path[25] = { 0 };
-        strcpy(info_path, "/EFI/BOOT/DATAFLS.INF");
+        strcpy(info_path, "/EFI/BOOT/FILE.TXT");
 
         fp = fopen(info_file, "rb");
         if (!fp) {
