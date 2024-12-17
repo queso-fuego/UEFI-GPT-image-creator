@@ -54,7 +54,7 @@ write_gpt [options]
 options:
 -ad --add-data-files   Add local files to the basic data partition, and create
                        a <FILE.TXT> file in directory '/EFI/BOOT/' in the 
-                       ESP. This INF file will hold info for each file added
+                       ESP. This TXT file will hold info for each file added
                        ex: '-ad info.txt ../folderA/kernel.bin'.
 -ae --add-esp-files    Add local files to the generated EFI System Partition.
                        File paths must start under root '/' and end with a 
