@@ -396,7 +396,7 @@ bool write_gpts(FILE *image) {
             .partition_type_guid = ESP_GUID,
             .unique_guid = new_guid(),
             .starting_lba = esp_lba,
-            .ending_lba = esp_lba + esp_size_lbas,
+            .ending_lba = esp_lba + esp_size_lbas - 1,      // 0-based index lba size
             .attributes = 0,
             .name = u"EFI SYSTEM",
         },
@@ -406,7 +406,7 @@ bool write_gpts(FILE *image) {
             .partition_type_guid = BASIC_DATA_GUID,
             .unique_guid = new_guid(),
             .starting_lba = data_lba,
-            .ending_lba = data_lba + data_size_lbas,
+            .ending_lba = data_lba + data_size_lbas - 1,    // 0-based index lba size
             .attributes = 0,
             .name = u"BASIC DATA",
         },
@@ -1383,7 +1383,7 @@ int main(int argc, char *argv[]) {
     esp_lba = align_lba;
     esp_size_lbas = bytes_to_lbas(esp_size);
     data_size_lbas = bytes_to_lbas(data_size);
-    data_lba = next_aligned_lba(esp_lba + esp_size_lbas);
+    data_lba = next_aligned_lba(esp_lba + esp_size_lbas - 1);   // Use 0-based index size in lbas
 
     if (options.vhd) {
         // Only allow lba_size = 512 for vhd,
