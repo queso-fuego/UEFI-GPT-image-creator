@@ -459,50 +459,59 @@ bool write_gpts(FILE *image) {
 bool write_esp(FILE *image) {
     // Reserved sectors region --------------------------
     // Fill out Volume Boot Record (VBR)
-    const uint8_t reserved_sectors = 32; // FAT32
+    const uint8_t reserved_sectors = 32;    // FAT32
     Vbr vbr = {
-        .BS_jmpBoot = { 0xEB, 0x00, 0x90 },
-        .BS_OEMName = { "THISDISK" },
-        .BPB_BytesPerSec = lba_size,     // This is limited to only 512/1024/2048/4096
-        .BPB_SecPerClus = 1,
-        .BPB_RsvdSecCnt = reserved_sectors,
-        .BPB_NumFATs = 2,
-        .BPB_RootEntCnt = 0,
-        .BPB_TotSec16 = 0,
-        .BPB_Media = 0xF8,               // "Fixed" non-removable media; Could also be 0xF0 for e.g. flash drive
-        .BPB_FATSz16 = 0,
-        .BPB_SecPerTrk = 0,  
-        .BPB_NumHeads = 0,    
-        .BPB_HiddSec = esp_lba - 1,      // # of sectors before this partition/volume
-        .BPB_TotSec32 = esp_size_lbas,   // Size of this partition
-        .BPB_FATSz32 = (align_lba - reserved_sectors) / 2,  // Align data region on alignment value
-        .BPB_ExtFlags = 0,               // Mirrored FATs
-        .BPB_FSVer = 0,
-        .BPB_RootClus = 2,              // Clusters 0 & 1 are reserved; root dir cluster starts at 2
-        .BPB_FSInfo = 1,                // Sector 0 = this VBR; FS Info sector follows it
-        .BPB_BkBootSec = 6,
-        .BPB_Reserved = { 0 },
-        .BS_DrvNum = 0x80,              // 1st hard drive
-        .BS_Reserved1 = 0,
-        .BS_BootSig = 0x29,
-        .BS_VolID = { 0 }, 
-        .BS_VolLab = { "NO NAME    " }, // No volume label 
-        .BS_FilSysType = { "FAT32   " },
+        .BS_jmpBoot      = { 0xEB, 0x00, 0x90 },
+        .BS_OEMName      = { "THISDISK" },
+        .BPB_BytesPerSec = lba_size,         // This is limited to only 512/1024/2048/4096
+        .BPB_SecPerClus  = 1,
+        .BPB_RsvdSecCnt  = reserved_sectors,
+        .BPB_NumFATs     = 2,                // 2 FAT tables
+        .BPB_RootEntCnt  = 0,
+        .BPB_TotSec16    = 0,
+        .BPB_Media       = 0xF8,             // "Fixed" non-removable media; Could also be 0xF0 for e.g. flash drive
+        .BPB_FATSz16     = 0,
+        .BPB_SecPerTrk   = 0,  
+        .BPB_NumHeads    = 0,    
+        .BPB_HiddSec     = esp_lba - 1,      // # of sectors before this partition/volume
+        .BPB_TotSec32    = esp_size_lbas,    // Size of this partition
+        .BPB_FATSz32     = 0,                // Filled out below
+        .BPB_ExtFlags    = 0,                // Mirrored FATs
+        .BPB_FSVer       = 0,
+        .BPB_RootClus    = 2,                // Clusters 0 & 1 are reserved; root dir cluster starts at 2
+        .BPB_FSInfo      = 1,                // Sector 0 = this VBR; FS Info sector follows it
+        .BPB_BkBootSec   = 6,                // 6 seems to be common for backup boot sector #
+        .BPB_Reserved    = { 0 },
+        .BS_DrvNum       = 0x80,             // 1st hard drive
+        .BS_Reserved1    = 0,
+        .BS_BootSig      = 0x29,
+        .BS_VolID        = { 0 }, 
+        .BS_VolLab       = { "NO NAME    " },// No volume label 
+        .BS_FilSysType   = { "FAT32   " },
 
         // Not in fatgen103.doc tables
-        .boot_code = { 0 },
-        .bootsect_sig = 0xAA55,     
+        .boot_code       = { 0 },
+        .bootsect_sig    = 0xAA55,     
     };
+
+    //.BPB_FATSz32 = From FAT docs: TMP1 = disk_size_sectors - reserved sector count;
+    //                              TMP2 = (256 * sectors per cluster) + number of FATs;
+    //                              For FAT32 => TMP2 = TMP2 / 2;
+    //                              FATSz32 = (TMP1 + (TMP2 - 1)) / TMP2;
+    // This should get the # of sectors (LBAs) required to hold all of the clusters for the ESP size,
+    //   for 1 FAT table.
+    uint32_t temp = ((256 * vbr.BPB_SecPerClus) + vbr.BPB_NumFATs) / 2;
+    vbr.BPB_FATSz32 = ((esp_size_lbas - reserved_sectors) + (temp-1)) / temp;
 
     // Fill out file system info sector
     FSInfo fsinfo = {
-        .FSI_LeadSig = 0x41615252,
-        .FSI_Reserved1 = { 0 },
-        .FSI_StrucSig = 0x61417272,
+        .FSI_LeadSig    = 0x41615252,
+        .FSI_Reserved1  = { 0 },
+        .FSI_StrucSig   = 0x61417272,
         .FSI_Free_Count = 0xFFFFFFFF,
-        .FSI_Nxt_Free = 5,              // First available cluster (value = 0) after /EFI/BOOT
-        .FSI_Reserved2 = { 0 },
-        .FSI_TrailSig = 0xAA550000,
+        .FSI_Nxt_Free   = 5,            // First available cluster (value = 0) after /EFI/BOOT
+        .FSI_Reserved2  = { 0 },
+        .FSI_TrailSig   = 0xAA550000,
     };
 
     fat32_fats_lba = esp_lba + vbr.BPB_RsvdSecCnt;
@@ -669,12 +678,16 @@ bool add_file_to_esp(char *file_name, FILE *file, FILE *image, File_Type type, u
 
     // Add new clusters to FATs
     for (uint8_t i = 0; i < vbr.BPB_NumFATs; i++) {
+        uint32_t cluster = fsinfo.FSI_Nxt_Free;
+        next_free_cluster = cluster;
+
+        // Go to cluster location in FATs region
         fseek(image, (fat32_fats_lba + (i * vbr.BPB_FATSz32)) * lba_size, SEEK_SET);
         fseek(image, next_free_cluster * sizeof next_free_cluster, SEEK_CUR);
 
-        uint32_t cluster = fsinfo.FSI_Nxt_Free;
-        next_free_cluster = cluster;
         if (type == TYPE_FILE && file_size_bytes != 0) {
+            // Final cluster holds the end of chain (EOC) marker for final lba, can write until
+            //   size -1 lbas first.
             for (uint64_t lba = 0; lba < file_size_lbas - 1; lba++) {
                 cluster++;  // Each cluster points to next cluster of file data
                 next_free_cluster++;
@@ -682,8 +695,8 @@ bool add_file_to_esp(char *file_name, FILE *file, FILE *image, File_Type type, u
             }
         }
 
-        // Write EOC marker cluster, this would be the only cluster added for a directory
-        //   (type == TYPE_DIR)
+        // Write EOC marker cluster for final file lba; this would be the only cluster added 
+        //   for a directory (type == TYPE_DIR)
         cluster = 0xFFFFFFFF;
         next_free_cluster++;
         fwrite(&cluster, sizeof cluster, 1, image);
