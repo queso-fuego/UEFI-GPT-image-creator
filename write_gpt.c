@@ -1080,6 +1080,11 @@ Options get_opts(int argc, char *argv[]) {
             }
 
             options.data_size = strtol(argv[i], NULL, 10);
+            if(options.data_size >= 102400) {
+                fprintf(stderr, "Warning: data-size must not be greater than 102399.\n");
+                options.error = true;
+                return options;
+            }
             continue;
         }
 
@@ -1342,8 +1347,8 @@ int main(int argc, char *argv[]) {
                 "                       To add multiple files (up to 10), use multiple\n"
                 "                       <path> <file> args.\n"
                 "                       ex: '-ae /DIR1/ FILE1.TXT /DIR2/ FILE2.TXT'.\n"
-                "-ds --data-size        Set the size of the Basic Data Partition in MiB; Minimum\n" 
-                "                       size is 1 MiB\n" 
+                "-ds --data-size        Set the size of the Basic Data Partition in MiB; Range:\n"
+                "                       1 MiB to 10399 MiB, inclusively\n"
                 "-es --esp-size         Set the size of the EFI System Partition in MiB\n"
                 "-h  --help             Print this help text\n"
                 "-i  --image-name       Set the image name. Default name is 'test.hdd'\n"
