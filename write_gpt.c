@@ -1407,13 +1407,12 @@ int main(int argc, char *argv[]) {
         }
 
         // Add VHD suffix to image name
-        char *buf = calloc(1, strlen(image_name) + 4);
+        char *buf = calloc(1, strlen(image_name) + 5);
         strcpy(buf, image_name);
 
         char *dot_pos = strrchr(buf, '.');
-        if (!dot_pos) strcat(buf, ".vhd");
-        else          strcpy(dot_pos, ".vhd");
-
+        if (!dot_pos) dot_pos = buf + strlen(buf); 
+        strcpy(dot_pos, ".vhd");
         image_name = buf;
     }
 
