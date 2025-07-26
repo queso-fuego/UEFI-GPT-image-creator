@@ -5,7 +5,7 @@ qemu-system-x86_64 ^
 -m 256M ^
 -display sdl ^
 -vga std ^
--name TESTOS ^
+-name TEST ^
 -machine q35 ^
 -usb ^
 -device usb-mouse ^
