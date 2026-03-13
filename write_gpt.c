@@ -372,7 +372,7 @@ bool write_mbr(FILE *image) {
 bool write_gpts(FILE *image) {
     // Fill out primary GPT header
     Gpt_Header primary_gpt = {
-        .signature = { "EFI PART" },
+        .signature = { 'E','F','I',' ','P','A','R','T' },
         .revision = 0x00010000,   // Version 1.0
         .header_size = 92,
         .header_crc32 = 0,      // Will calculate later
@@ -462,7 +462,7 @@ bool write_esp(FILE *image) {
     const uint8_t reserved_sectors = 32;    // FAT32
     Vbr vbr = {
         .BS_jmpBoot      = { 0xEB, 0x00, 0x90 },
-        .BS_OEMName      = { "THISDISK" },
+        .BS_OEMName      = { 'T','H','I','S','D','I','S','K' },
         .BPB_BytesPerSec = lba_size,         // This is limited to only 512/1024/2048/4096
         .BPB_SecPerClus  = 1,
         .BPB_RsvdSecCnt  = reserved_sectors,
@@ -486,8 +486,8 @@ bool write_esp(FILE *image) {
         .BS_Reserved1    = 0,
         .BS_BootSig      = 0x29,
         .BS_VolID        = { 0 }, 
-        .BS_VolLab       = { "NO NAME    " },// No volume label 
-        .BS_FilSysType   = { "FAT32   " },
+        .BS_VolLab       = { 'N','O',' ','N','A','M','E',' ',' ',' ',' ' },	// No volume label 
+        .BS_FilSysType   = { 'F','A','T','3','2',' ',' ',' ' },
 
         // Not in fatgen103.doc tables
         .boot_code       = { 0 },
@@ -593,7 +593,7 @@ bool write_esp(FILE *image) {
     // Root '/' Directory entries
     // "/EFI" dir entry 
     FAT32_Dir_Entry_Short dir_ent = {
-        .DIR_Name = { "EFI        " },
+        .DIR_Name = { 'E','F','I',' ',' ',' ',' ',' ',' ',' ',' ' },
         .DIR_Attr = ATTR_DIRECTORY,
         .DIR_NTRes = 0,
         .DIR_CrtTimeTenth = 0,
@@ -1205,14 +1205,14 @@ Options get_opts(int argc, char *argv[]) {
 void add_fixed_vhd_footer(FILE *image) {
     // Fill out VHD footer info
     Vhd vhd = {
-        .cookie = { "conectix" },
+        .cookie = { 'c','o','n','e','c','t','i','x' },
         .features = { 0 },
         .version = { 0x00, 0x01, 0x00, 0x00 },
         .data_offset = -1,
         .timestamp = { 0 }, // # of seconds since 01/01/2000
-        .creator_app = { "qfic" },
+        .creator_app = { 'q','f','i','c' },
         .creator_ver = { 0x00, 0x01, 0x00, 0x00},
-        .creator_OS = { "MYOS" },
+        .creator_OS = { 'M','Y','O','S' },
         .original_size = { 0 },
         .current_size = { 0 },
         .disk_geometry = { 0 },
